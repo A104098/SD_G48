@@ -7,16 +7,10 @@ import java.util.Scanner;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
-import server.aggregation.AggregationService;
-import server.auth.ServerManager;
 import server.cache.ProductCache;
-import server.data.TimeSeriesManager;
 import server.persistence.PersistenceManager;
 
-/**
- * Servidor principal para gestão de eventos e agregações.
- * Aceita conexões TCP e cria threads para cada cliente.
- */
+
 public class ServerMain {
     private static final int DEFAULT_PORT = 12345;
     private static final int DEFAULT_D = 30; // Dias históricos
@@ -31,11 +25,9 @@ public class ServerMain {
     private final AtomicBoolean running;
     private final PersistenceManager persistenceManager;
     private ServerSocket serverSocket;
-    private final int maxDays;
     
     public ServerMain(int port, int maxDays, int maxSeries) {
         this.port = port;
-        this.maxDays = maxDays;
         this.serverManager = new ServerManager();
         this.persistenceManager = new PersistenceManager();
         
@@ -54,9 +46,7 @@ public class ServerMain {
         this.running = new AtomicBoolean(false);
     }
     
-    /**
-     * Inicia o servidor.
-     */
+    //Inicia o servidor.
     public void start() throws IOException {
         if (running.get()) {
             throw new IllegalStateException("Servidor já está a correr");
@@ -78,9 +68,7 @@ public class ServerMain {
         commandThread.start();
     }
     
-    /**
-     * Aceita conexões de clientes.
-     */
+    //Aceita conexões de clientes
     private void acceptConnections() {
         while (running.get()) {
             try {
@@ -105,9 +93,7 @@ public class ServerMain {
         }
     }
     
-    /**
-     * Processa comandos do servidor.
-     */
+    //Processa comandos do servidor.
     private void handleCommands() {
         Scanner scanner = new Scanner(System.in);
         
@@ -187,7 +173,7 @@ public class ServerMain {
         System.out.println("\n=== Estatísticas do Servidor ===");
         System.out.println("Utilizadores registados: " + serverManager.getUserCount());
         System.out.println("Dia corrente: " + tsManager.getCurrentDayId());
-        System.out.println("Eventos hoje: " + tsManager.getCurrentDay().getEventCount());
+        System.out.println("Eventos hoje: " + tsManager.getCurrentDayEventCount());
         System.out.println("Dias históricos: " + tsManager.getHistoricalDayCount() + "/" + tsManager.getMaxDays());
         System.out.println("Cache: " + cache.size() + "/" + cache.getMaxSeries());
         System.out.println("================================\n");

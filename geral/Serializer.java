@@ -204,17 +204,13 @@ public class Serializer {
         return reader.read(dis);
     }
     
-    /**
-     * Interface funcional para escrever dados serializados.
-     */
+    // Interface funcional para escrever dados serializados.
     @FunctionalInterface
     public interface SerializableWriter {
         void write(DataOutputStream out) throws IOException;
     }
     
-    /**
-     * Interface funcional para ler dados serializados.
-     */
+    // Interface funcional para ler dados serializados.
     @FunctionalInterface
     public interface SerializableReader<T> {
         T read(DataInputStream in) throws IOException;

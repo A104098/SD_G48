@@ -1,65 +1,27 @@
-package server.auth;
+package server;
 
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.Arrays;
-
-/**
- * Representa um utilizador do sistema.
- */
+//Representa um utilizador do sistema
 public class User {
     private final String username;
-    private final byte[] passwordHash;
+    private final String password;
     
-    /**
-     * Cria um novo utilizador com password em hash.
-     * @param username Nome de utilizador
-     * @param password Password em texto limpo (será guardada em hash)
-     */
+    //Cria um novo utilizador
     public User(String username, String password) {
         this.username = username;
-        this.passwordHash = hashPassword(password);
-    }
-    
-    /**
-     * Construtor público para criar utilizador com hash já calculado (persistência).
-     */
-    public User(String username, byte[] passwordHash) {
-        this.username = username;
-        this.passwordHash = passwordHash;
+        this.password = password;
     }
     
     public String getUsername() {
         return username;
     }
     
-    public byte[] getPasswordHash() {
-        return passwordHash.clone();
+    public String getPassword() {
+        return password;
     }
     
-    /**
-     * Verifica se a password fornecida corresponde à password do utilizador.
-     * @param password Password a verificar
-     * @return true se a password está correta
-     */
+    //Verifica se a password fornecida está correta
     public boolean checkPassword(String password) {
-        byte[] hash = hashPassword(password);
-        return Arrays.equals(passwordHash, hash);
-    }
-    
-    /**
-     * Calcula o hash SHA-256 de uma password.
-     * @param password Password em texto limpo
-     * @return Hash da password
-     */
-    private static byte[] hashPassword(String password) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return digest.digest(password.getBytes("UTF-8"));
-        } catch (NoSuchAlgorithmException | java.io.UnsupportedEncodingException e) {
-            // SHA-256 está sempre disponível
-            throw new RuntimeException("Erro ao calcular hash da password", e);
-        }
+        return this.password.equals(password);
     }
     
     @Override

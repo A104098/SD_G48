@@ -3,9 +3,9 @@ package geral;
 import java.io.*;
 import java.util.*;
 
-/**
- * Protocolo de comunicação partilhado entre cliente e servidor.
- * Define operações, requests, responses e eventos.
+/*
+Protocolo de comunicação partilhado entre cliente e servidor.
+Define operações, requests, responses e eventos.
  */
 public class Protocol {
     

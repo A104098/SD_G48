@@ -3,9 +3,6 @@ package client;
 import java.io.IOException;
 import java.util.Scanner;
 
-/**
- * Interface de utilizador simples para testar o cliente.
- */
 public class ClientMain {
     private static final String DEFAULT_HOST = "localhost";
     private static final int DEFAULT_PORT = 12345;

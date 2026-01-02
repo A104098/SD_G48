@@ -5,15 +5,9 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.Socket;
-import server.aggregation.AggregationService;
-import server.auth.ServerManager;
-import server.auth.User;
-import server.data.TimeSeriesManager;
 
-/**
- * Handler para uma conexão de cliente.
- * Processa pedidos e envia respostas usando o protocolo binário.
- */
+//Handler para uma conexão de cliente.
+//Processa pedidos e envia respostas usando o protocolo
 public class ClientHandler implements Runnable {
     private final Socket socket;
     private final ServerManager serverManager;

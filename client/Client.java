@@ -3,9 +3,6 @@ package client;
 import geral.Protocol;
 import java.io.IOException;
 
-/**
- * API de alto nível para o cliente.
- */
 public class Client {
     private final Connection connection;
     private boolean authenticated;

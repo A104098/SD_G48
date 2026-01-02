@@ -2,10 +2,9 @@ package server.persistence;
 
 import geral.Protocol.Event;
 import geral.Serializer;
-import server.data.TimeSeries;
-import server.data.TimeSeriesManager;
 import java.io.*;
 import java.util.List;
+import server.TimeSeriesManager;
 
 /**
  * Persistência de séries temporais.
@@ -35,22 +34,22 @@ public class TimeSeriesPersistence {
             
             // Header
             out.writeInt(0x54494D45); // "TIME" magic number
-            out.writeInt(1); // Versão
+            out.writeInt(2); // Versão 2 (sem TimeSeries)
             
             // Configuração
             out.writeInt(manager.getMaxDays());
             out.writeInt(manager.getCurrentDayId());
             
             // Dia corrente
-            TimeSeries currentDay = manager.getCurrentDay();
-            writeSeries(out, currentDay);
+            List<Event> currentDayEvents = manager.getCurrentDayEvents();
+            writeEventList(out, currentDayEvents);
             
             // Dias históricos
-            List<TimeSeries> historical = manager.getAllHistoricalSeries();
-            out.writeInt(historical.size());
+            List<List<Event>> allEvents = manager.getAllEvents(manager.getHistoricalDayCount());
+            out.writeInt(allEvents.size());
             
-            for (TimeSeries series : historical) {
-                writeSeries(out, series);
+            for (List<Event> dayEvents : allEvents) {
+                writeEventList(out, dayEvents);
             }
         }
     }
@@ -77,42 +76,42 @@ public class TimeSeriesPersistence {
             }
             
             int version = in.readInt();
-            if (version != 1) {
+            if (version == 1) {
+                // Formato antigo com TimeSeries - não suportado
+                throw new IOException("Formato antigo não suportado. Delete o ficheiro e reinicie.");
+            } else if (version != 2) {
                 throw new IOException("Versão não suportada: " + version);
             }
             
             // Configuração
             int maxDays = in.readInt();
-            int currentDayId = in.readInt();
+            in.readInt(); // currentDayId é gerido internamente
             
             // Criar manager
             TimeSeriesManager manager = new TimeSeriesManager(maxDays);
             
             // Carregar dia corrente
-            TimeSeries currentDay = readSeries(in);
+            List<Event> currentDayEvents = readEventList(in);
             
             // Carregar dias históricos
             int historicalCount = in.readInt();
             
             // Restaurar estado
-            // Como não temos setters, precisamos simular os dias
-            // Para cada dia histórico, avançamos um dia
+            // Para cada dia histórico, adicionar eventos e avançar dia
             for (int i = 0; i < historicalCount; i++) {
-                TimeSeries historical = readSeries(in);
+                List<Event> dayEvents = readEventList(in);
                 
-                // Adicionar eventos do dia histórico ao dia corrente
-                for (Event event : historical.getEvents()) {
+                // Adicionar eventos ao dia corrente
+                for (Event event : dayEvents) {
                     manager.addEvent(event);
                 }
                 
                 // Avançar para próximo dia
-                if (i < historicalCount - 1 || currentDay.getEventCount() > 0) {
-                    manager.newDay();
-                }
+                manager.newDay();
             }
             
-            // Adicionar eventos do dia corrente
-            for (Event event : currentDay.getEvents()) {
+            // Adicionar eventos do dia corrente final
+            for (Event event : currentDayEvents) {
                 manager.addEvent(event);
             }
             
@@ -121,16 +120,9 @@ public class TimeSeriesPersistence {
     }
     
     /**
-     * Escreve uma série temporal.
+     * Escreve uma lista de eventos.
      */
-    private void writeSeries(DataOutputStream out, TimeSeries series) throws IOException {
-        // Metadados
-        out.writeInt(series.getDayId());
-        out.writeLong(series.getStartTime());
-        out.writeBoolean(series.isCompleted());
-        
-        // Eventos
-        List<Event> events = series.getEvents();
+    private void writeEventList(DataOutputStream out, List<Event> events) throws IOException {
         out.writeInt(events.size());
         
         for (Event event : events) {
@@ -139,29 +131,18 @@ public class TimeSeriesPersistence {
     }
     
     /**
-     * Lê uma série temporal.
+     * Lê uma lista de eventos.
      */
-    private TimeSeries readSeries(DataInputStream in) throws IOException {
-        // Metadados
-        int dayId = in.readInt();
-        long startTime = in.readLong();
-        boolean completed = in.readBoolean();
-        
-        TimeSeries series = new TimeSeries(dayId);
-        
-        // Eventos
+    private List<Event> readEventList(DataInputStream in) throws IOException {
         int eventCount = in.readInt();
+        List<Event> events = new java.util.ArrayList<>();
         
         for (int i = 0; i < eventCount; i++) {
             Event event = readEvent(in);
-            series.addEvent(event);
+            events.add(event);
         }
         
-        if (completed) {
-            series.complete();
-        }
-        
-        return series;
+        return events;
     }
     
     /**

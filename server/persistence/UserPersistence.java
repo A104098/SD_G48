@@ -3,7 +3,7 @@ package server.persistence;
 import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
-import server.auth.User;
+import server.User;
 
 /**
  * Persistência de utilizadores.
@@ -93,10 +93,10 @@ public class UserPersistence {
         out.writeInt(usernameBytes.length);
         out.write(usernameBytes);
         
-        // Password hash
-        byte[] passwordHash = user.getPasswordHash();
-        out.writeInt(passwordHash.length);
-        out.write(passwordHash);
+        // Password (string simples)
+        byte[] passwordBytes = user.getPassword().getBytes("UTF-8");
+        out.writeInt(passwordBytes.length);
+        out.write(passwordBytes);
     }
     
     /**
@@ -109,11 +109,12 @@ public class UserPersistence {
         in.readFully(usernameBytes);
         String username = new String(usernameBytes, "UTF-8");
         
-        // Password hash
-        int hashLen = in.readInt();
-        byte[] passwordHash = new byte[hashLen];
-        in.readFully(passwordHash);
+        // Password (string simples)
+        int passwordLen = in.readInt();
+        byte[] passwordBytes = new byte[passwordLen];
+        in.readFully(passwordBytes);
+        String password = new String(passwordBytes, "UTF-8");
         
-        return new User(username, passwordHash);
+        return new User(username, password);
     }
 }

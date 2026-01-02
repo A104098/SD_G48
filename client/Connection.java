@@ -7,9 +7,7 @@ import java.io.IOException;
 import java.net.Socket;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * Conexão TCP com o servidor.
- */
+
 public class Connection implements AutoCloseable {
     private final String host;
     private final int port;

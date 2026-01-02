@@ -1,18 +1,16 @@
-package server.aggregation;
+package server;
 
 import geral.Protocol.Event;
-import server.cache.ProductCache;
-import server.cache.ProductCache.CachedAggregation;
-import server.data.TimeSeries;
-import server.data.TimeSeriesManager;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import server.cache.ProductCache;
+import server.cache.ProductCache.CachedAggregation;
 
-/**
- * Serviço de agregações lazy com caching.
- * Calcula agregações sob demanda e guarda resultados no cache.
+/*
+Serviço de agregações lazy com caching.
+Calcula agregações sob demanda e guarda resultados no cache.
+Thread-safe para acesso concorrente.
  */
 public class AggregationService {
     private final TimeSeriesManager tsManager;
@@ -23,12 +21,7 @@ public class AggregationService {
         this.cache = cache;
     }
     
-    /**
-     * Agrega quantidade total vendida de um produto nos últimos N dias.
-     * @param product Nome do produto
-     * @param days Número de dias (1 a D)
-     * @return Quantidade total ou -1 se não houver dados suficientes
-     */
+    //Agrega quantidade total vendida de um produto nos últimos N dias.
     public int aggregateQuantity(String product, int days) {
         if (days < 1 || days > tsManager.getMaxDays()) {
             return -1;
@@ -44,16 +37,17 @@ public class AggregationService {
         }
         
         // Calcular agregação
-        List<TimeSeries> series = tsManager.getSeriesList(days);
-        if (series.size() < days) {
+        List<List<Event>> allDaysEvents = tsManager.getAllEvents(days);
+        if (allDaysEvents.size() < days) {
             return -1; // Não há dados suficientes
         }
         
         int total = 0;
-        for (TimeSeries ts : series) {
-            List<Event> events = ts.getEventsByProduct(product);
-            for (Event event : events) {
-                total += event.getQuantity();
+        for (List<Event> dayEvents : allDaysEvents) {
+            for (Event event : dayEvents) {
+                if (event.getProduct().equals(product)) {
+                    total += event.getQuantity();
+                }
             }
         }
         
@@ -63,12 +57,7 @@ public class AggregationService {
         return total;
     }
     
-    /**
-     * Agrega receita total de um produto nos últimos N dias.
-     * @param product Nome do produto
-     * @param days Número de dias (1 a D)
-     * @return Receita total ou -1 se não houver dados suficientes
-     */
+    //Agrega receita total de um produto nos últimos N dias.
     public double aggregateRevenue(String product, int days) {
         if (days < 1 || days > tsManager.getMaxDays()) {
             return -1;
@@ -84,16 +73,17 @@ public class AggregationService {
         }
         
         // Calcular agregação
-        List<TimeSeries> series = tsManager.getSeriesList(days);
-        if (series.size() < days) {
-            return -1; // Não há dados suficientes
+        List<List<Event>> allDaysEvents = tsManager.getAllEvents(days);
+        if (allDaysEvents.size() < days) {
+            return -1;
         }
         
         double total = 0;
-        for (TimeSeries ts : series) {
-            List<Event> events = ts.getEventsByProduct(product);
-            for (Event event : events) {
-                total += event.getQuantity() * event.getPrice();
+        for (List<Event> dayEvents : allDaysEvents) {
+            for (Event event : dayEvents) {
+                if (event.getProduct().equals(product)) {
+                    total += event.getQuantity() * event.getPrice();
+                }
             }
         }
         
@@ -103,12 +93,7 @@ public class AggregationService {
         return total;
     }
     
-    /**
-     * Agrega preço médio de um produto nos últimos N dias.
-     * @param product Nome do produto
-     * @param days Número de dias (1 a D)
-     * @return Preço médio ou -1 se não houver dados suficientes
-     */
+    //Agrega preço médio de um produto nos últimos N dias.
     public double aggregateAveragePrice(String product, int days) {
         if (days < 1 || days > tsManager.getMaxDays()) {
             return -1;
@@ -124,24 +109,25 @@ public class AggregationService {
         }
         
         // Calcular agregação
-        List<TimeSeries> series = tsManager.getSeriesList(days);
-        if (series.size() < days) {
-            return -1; // Não há dados suficientes
+        List<List<Event>> allDaysEvents = tsManager.getAllEvents(days);
+        if (allDaysEvents.size() < days) {
+            return -1;
         }
         
         double totalRevenue = 0;
         int totalQuantity = 0;
         
-        for (TimeSeries ts : series) {
-            List<Event> events = ts.getEventsByProduct(product);
-            for (Event event : events) {
-                totalRevenue += event.getQuantity() * event.getPrice();
-                totalQuantity += event.getQuantity();
+        for (List<Event> dayEvents : allDaysEvents) {
+            for (Event event : dayEvents) {
+                if (event.getProduct().equals(product)) {
+                    totalRevenue += event.getQuantity() * event.getPrice();
+                    totalQuantity += event.getQuantity();
+                }
             }
         }
         
         if (totalQuantity == 0) {
-            return 0; // Nenhuma venda
+            return 0;
         }
         
         double avgPrice = totalRevenue / totalQuantity;
@@ -152,13 +138,7 @@ public class AggregationService {
         return avgPrice;
     }
     
-    /**
-     * Conta dias em que ambos os produtos foram vendidos (interseção).
-     * @param product1 Primeiro produto
-     * @param product2 Segundo produto
-     * @param days Número de dias (1 a D)
-     * @return Número de dias ou -1 se não houver dados suficientes
-     */
+    //Conta dias em que ambos os produtos foram vendidos (interseção).
     public int countCommonDays(String product1, String product2, int days) {
         if (days < 1 || days > tsManager.getMaxDays()) {
             return -1;
@@ -174,14 +154,22 @@ public class AggregationService {
         }
         
         // Calcular agregação
-        List<TimeSeries> series = tsManager.getSeriesList(days);
-        if (series.size() < days) {
-            return -1; // Não há dados suficientes
+        List<List<Event>> allDaysEvents = tsManager.getAllEvents(days);
+        if (allDaysEvents.size() < days) {
+            return -1;
         }
         
         int commonDays = 0;
-        for (TimeSeries ts : series) {
-            if (ts.hasBothProducts(product1, product2)) {
+        for (List<Event> dayEvents : allDaysEvents) {
+            boolean hasProduct1 = false;
+            boolean hasProduct2 = false;
+            
+            for (Event event : dayEvents) {
+                if (event.getProduct().equals(product1)) hasProduct1 = true;
+                if (event.getProduct().equals(product2)) hasProduct2 = true;
+            }
+            
+            if (hasProduct1 && hasProduct2) {
                 commonDays++;
             }
         }
@@ -192,12 +180,7 @@ public class AggregationService {
         return commonDays;
     }
     
-    /**
-     * Encontra a maior sequência consecutiva de vendas de um produto.
-     * @param product Nome do produto
-     * @param days Número de dias (1 a D)
-     * @return Tamanho da maior sequência ou -1 se não houver dados suficientes
-     */
+    //Encontra a maior sequência consecutiva de vendas de um produto
     public int findMaxConsecutive(String product, int days) {
         if (days < 1 || days > tsManager.getMaxDays()) {
             return -1;
@@ -213,15 +196,22 @@ public class AggregationService {
         }
         
         // Calcular agregação
-        List<TimeSeries> series = tsManager.getSeriesList(days);
-        if (series.size() < days) {
-            return -1; // Não há dados suficientes
+        List<List<Event>> allDaysEvents = tsManager.getAllEvents(days);
+        if (allDaysEvents.size() < days) {
+            return -1;
         }
         
         int maxConsecutive = 0;
-        for (TimeSeries ts : series) {
-            int consecutive = ts.getMaxConsecutive(product);
-            maxConsecutive = Math.max(maxConsecutive, consecutive);
+        for (List<Event> dayEvents : allDaysEvents) {
+            int currentConsecutive = 0;
+            for (Event event : dayEvents) {
+                if (event.getProduct().equals(product)) {
+                    currentConsecutive++;
+                    maxConsecutive = Math.max(maxConsecutive, currentConsecutive);
+                } else {
+                    currentConsecutive = 0;
+                }
+            }
         }
         
         // Guardar no cache
@@ -230,20 +220,15 @@ public class AggregationService {
         return maxConsecutive;
     }
     
-    /**
-     * Agrega dados de múltiplos produtos (filtragem).
-     * @param products Lista de produtos
-     * @param days Número de dias (1 a D)
-     * @return Mapa com agregações por produto ou null se não houver dados
-     */
+    //Agrega múltiplos produtos nos últimos N dias.
     public Map<String, ProductAggregation> aggregateMultipleProducts(List<String> products, int days) {
         if (days < 1 || days > tsManager.getMaxDays()) {
             return null;
         }
         
-        List<TimeSeries> series = tsManager.getSeriesList(days);
-        if (series.size() < days) {
-            return null; // Não há dados suficientes
+        List<List<Event>> allDaysEvents = tsManager.getAllEvents(days);
+        if (allDaysEvents.size() < days) {
+            return null;
         }
         
         Map<String, ProductAggregation> result = new HashMap<>();
@@ -253,12 +238,13 @@ public class AggregationService {
             double revenue = 0;
             int eventCount = 0;
             
-            for (TimeSeries ts : series) {
-                List<Event> events = ts.getEventsByProduct(product);
-                for (Event event : events) {
-                    quantity += event.getQuantity();
-                    revenue += event.getQuantity() * event.getPrice();
-                    eventCount++;
+            for (List<Event> dayEvents : allDaysEvents) {
+                for (Event event : dayEvents) {
+                    if (event.getProduct().equals(product)) {
+                        quantity += event.getQuantity();
+                        revenue += event.getQuantity() * event.getPrice();
+                        eventCount++;
+                    }
                 }
             }
             
@@ -269,24 +255,17 @@ public class AggregationService {
         return result;
     }
     
-    /**
-     * Invalida cache quando um novo evento é adicionado.
-     * @param product Produto do evento
-     */
+    //Invalida cache quando um novo evento é adicionado.
     public void invalidateOnNewEvent(String product) {
         cache.invalidateProduct(product);
     }
     
-    /**
-     * Invalida cache quando um novo dia começa.
-     */
+    //Invalida cache quando um novo dia começa.
     public void invalidateOnNewDay() {
         cache.clear(); // Novo dia invalida todas as agregações
     }
     
-    /**
-     * Classe auxiliar para agregações de produtos.
-     */
+    //Classe auxiliar para agregações de produtos.
     public static class ProductAggregation {
         private final int quantity;
         private final double revenue;

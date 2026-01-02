@@ -2,9 +2,9 @@ package server.persistence;
 
 import java.io.IOException;
 import java.util.List;
-import server.auth.ServerManager;
-import server.auth.User;
-import server.data.TimeSeriesManager;
+import server.ServerManager;
+import server.TimeSeriesManager;
+import server.User;
 
 /**
  * Gestor centralizado de persistência.
@@ -47,7 +47,7 @@ public class PersistenceManager {
         timeSeriesPersistence.save(tsManager);
         System.out.println("  - Dia corrente: " + tsManager.getCurrentDayId());
         System.out.println("  - Dias históricos: " + tsManager.getHistoricalDayCount());
-        System.out.println("  - Eventos hoje: " + tsManager.getCurrentDay().getEventCount());
+        System.out.println("  - Eventos hoje: " + tsManager.getCurrentDayEventCount());
         
         System.out.println("Dados guardados com sucesso!");
     }
@@ -78,7 +78,7 @@ public class PersistenceManager {
         } else {
             System.out.println("  - Dia corrente: " + tsManager.getCurrentDayId());
             System.out.println("  - Dias históricos: " + tsManager.getHistoricalDayCount());
-            System.out.println("  - Eventos hoje: " + tsManager.getCurrentDay().getEventCount());
+            System.out.println("  - Eventos hoje: " + tsManager.getCurrentDayEventCount());
         }
         
         System.out.println("Dados carregados com sucesso!");

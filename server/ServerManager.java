@@ -1,4 +1,4 @@
-package server.auth;
+package server;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -17,12 +17,7 @@ public class ServerManager {
         this.lock = new ReentrantReadWriteLock();
     }
     
-    /**
-     * Regista um novo utilizador no sistema.
-     * @param username Nome de utilizador
-     * @param password Password
-     * @return true se o registo foi bem sucedido, false se o utilizador já existe
-     */
+    //Regista um novo utilizador no sistema
     public boolean register(String username, String password) {
         if (username == null || username.trim().isEmpty()) {
             return false;
@@ -48,12 +43,7 @@ public class ServerManager {
         }
     }
     
-    /**
-     * Autentica um utilizador.
-     * @param username Nome de utilizador
-     * @param password Password
-     * @return User se autenticação bem sucedida, null caso contrário
-     */
+    //Autentica um utilizador
     public User authenticate(String username, String password) {
         if (username == null || password == null) {
             return null;
@@ -78,11 +68,7 @@ public class ServerManager {
         }
     }
     
-    /**
-     * Verifica se um utilizador existe.
-     * @param username Nome de utilizador
-     * @return true se o utilizador existe
-     */
+    // Verifica se um utilizador existe.
     public boolean userExists(String username) {
         lock.readLock().lock();
         try {
@@ -92,19 +78,13 @@ public class ServerManager {
         }
     }
     
-    /**
-     * Obtém o número total de utilizadores registados.
-     * @return Número de utilizadores
-     */
+    //Obtém o número total de utilizadores registados.
     public int getUserCount() {
         return users.size();
     }
     
-    /**
-     * Remove um utilizador (útil para testes).
-     * @param username Nome de utilizador a remover
-     * @return true se o utilizador foi removido
-     */
+
+    //Remove um utilizador.
     public boolean removeUser(String username) {
         lock.writeLock().lock();
         try {
@@ -114,22 +94,7 @@ public class ServerManager {
         }
     }
     
-    /**
-     * Limpa todos os utilizadores (útil para testes).
-     */
-    public void clear() {
-        lock.writeLock().lock();
-        try {
-            users.clear();
-        } finally {
-            lock.writeLock().unlock();
-        }
-    }
-    
-    /**
-     * Obtém todos os utilizadores (para persistência).
-     * @return Lista com todos os utilizadores
-     */
+    //Obtém todos os utilizadores (para persistência)
     public java.util.List<User> getAllUsers() {
         lock.readLock().lock();
         try {
@@ -139,12 +104,7 @@ public class ServerManager {
         }
     }
     
-    /**
-     * Regista um utilizador já existente (com hash de password).
-     * Usado pela camada de persistência.
-     * @param user Utilizador a registar
-     * @return true se sucesso
-     */
+    //Regista um utilizador já existente (com hash de password : persistência)
     public boolean register(User user) {
         if (user == null) {
             return false;
