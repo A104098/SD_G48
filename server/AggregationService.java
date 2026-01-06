@@ -58,12 +58,12 @@ public class AggregationService {
     }
     
     //Agrega receita total de um produto nos últimos N dias.
-    public double aggregateRevenue(String product, int days) {
+    public double aggregateVolume(String product, int days) {
         if (days < 1 || days > tsManager.getMaxDays()) {
             return -1;
         }
         
-        String cacheKey = String.format("rev:%s:%d", product, days);
+        String cacheKey = String.format("vol:%s:%d", product, days);
         int currentDayId = tsManager.getCurrentDayId();
         
         // Verificar cache
@@ -114,13 +114,13 @@ public class AggregationService {
             return -1;
         }
         
-        double totalRevenue = 0;
+        double totalVolume = 0;
         int totalQuantity = 0;
         
         for (List<Event> dayEvents : allDaysEvents) {
             for (Event event : dayEvents) {
                 if (event.getProduct().equals(product)) {
-                    totalRevenue += event.getQuantity() * event.getPrice();
+                    totalVolume += event.getQuantity() * event.getPrice();
                     totalQuantity += event.getQuantity();
                 }
             }
@@ -130,7 +130,7 @@ public class AggregationService {
             return 0;
         }
         
-        double avgPrice = totalRevenue / totalQuantity;
+        double avgPrice = totalVolume / totalQuantity;
         
         // Guardar no cache
         cache.put(cacheKey, new CachedAggregation(avgPrice, currentDayId));
@@ -278,21 +278,21 @@ public class AggregationService {
         
         for (String product : products) {
             int quantity = 0;
-            double revenue = 0;
+            double volume = 0;
             int eventCount = 0;
             
             for (List<Event> dayEvents : allDaysEvents) {
                 for (Event event : dayEvents) {
                     if (event.getProduct().equals(product)) {
                         quantity += event.getQuantity();
-                        revenue += event.getQuantity() * event.getPrice();
+                        volume += event.getQuantity() * event.getPrice();
                         eventCount++;
                     }
                 }
             }
             
-            double avgPrice = eventCount > 0 ? revenue / quantity : 0;
-            result.put(product, new ProductAggregation(quantity, revenue, avgPrice, eventCount));
+            double avgPrice = eventCount > 0 ? volume / quantity : 0;
+            result.put(product, new ProductAggregation(quantity, volume, avgPrice, eventCount));
         }
         
         return result;
@@ -311,37 +311,37 @@ public class AggregationService {
     //Classe auxiliar para agregações de produtos.
     public static class ProductAggregation {
         private final int quantity;
-        private final double revenue;
+        private final double volume;
         private final double avgPrice;
         private final int eventCount;
-        
-        public ProductAggregation(int quantity, double revenue, double avgPrice, int eventCount) {
+
+        public ProductAggregation(int quantity, double volume, double avgPrice, int eventCount) {
             this.quantity = quantity;
-            this.revenue = revenue;
+            this.volume = volume;
             this.avgPrice = avgPrice;
             this.eventCount = eventCount;
         }
-        
+
         public int getQuantity() {
             return quantity;
         }
-        
-        public double getRevenue() {
-            return revenue;
+
+        public double getVolume() {
+            return volume;
         }
-        
+
         public double getAveragePrice() {
             return avgPrice;
         }
-        
+
         public int getEventCount() {
             return eventCount;
         }
-        
+
         @Override
         public String toString() {
-            return String.format("ProductAggregation[qty=%d, rev=%.2f, avg=%.2f, events=%d]",
-                quantity, revenue, avgPrice, eventCount);
+            return String.format("ProductAggregation[qty=%d, vol=%.2f, avg=%.2f, events=%d]",
+                quantity, volume, avgPrice, eventCount);
         }
     }
 }

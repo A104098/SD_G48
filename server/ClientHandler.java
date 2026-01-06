@@ -195,15 +195,13 @@ public class ClientHandler implements Runnable {
                 Protocol.STATUS_INVALID_PARAMS, "Parâmetros inválidos");
         }
         
-        double result = aggregationService.aggregateRevenue(product, days);
-        
+        double result = aggregationService.aggregateVolume(product, days);
         if (result == -1) {
             return Protocol.Response.error(request.getRequestId(), 
                 Protocol.STATUS_ERROR, "Dados insuficientes");
         }
-        
         return Protocol.Response.success(request.getRequestId())
-            .setData("revenue", result);
+            .setData("volume", result);
     }
     
     private Protocol.Response handleAveragePrice(Protocol.Request request) {

@@ -7,10 +7,12 @@ public class Client {
     private final Connection connection;
     private boolean authenticated;
     private String currentUser;
+    private String lastErrorMessage;
     
     public Client(String host, int port) {
         this.connection = new Connection(host, port);
         this.authenticated = false;
+        this.lastErrorMessage = null;
     }
     
     public void connect() throws IOException {
@@ -76,16 +78,21 @@ public class Client {
         return -1;
     }
     
-    public double aggregateRevenue(String product, int days) throws IOException {
+    public double aggregateVolume(String product, int days) throws IOException {
         ensureAuthenticated();
-        Protocol.Response response = connection.aggregateRevenue(product, days);
-        
+        Protocol.Response response = connection.aggregateVolume(product, days);
         if (response.isSuccess()) {
-            Double result = response.getDouble("revenue");
+            lastErrorMessage = null;
+            Double result = response.getDouble("volume");
             return result != null ? result : -1;
+        } else {
+            lastErrorMessage = response.getErrorMessage();
         }
-        
         return -1;
+    }
+
+    public String getLastErrorMessage() {
+        return lastErrorMessage;
     }
     
     public double aggregateAverage(String product, int days) throws IOException {

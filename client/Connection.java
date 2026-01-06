@@ -82,7 +82,7 @@ public class Connection implements AutoCloseable {
         return sendRequest(request);
     }
     
-    public Protocol.Response aggregateRevenue(String product, int days) throws IOException {
+    public Protocol.Response aggregateVolume(String product, int days) throws IOException {
         Protocol.Request request = new Protocol.Request(requestIdCounter.getAndIncrement(), Protocol.OP_SALES_VOLUME);
         request.setParam("product", product);
         request.setParam("days", days);

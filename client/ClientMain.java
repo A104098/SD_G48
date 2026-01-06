@@ -59,52 +59,40 @@ public class ClientMain {
             case "register":
                 handleRegister(parts);
                 break;
-                
             case "login":
                 handleLogin(parts);
                 break;
-                
             case "logout":
                 handleLogout();
                 break;
-                
             case "add":
                 handleAddEvent(parts);
                 break;
-                
             case "qty":
                 handleAggregateQuantity(parts);
                 break;
-                
-            case "rev":
-                handleAggregateRevenue(parts);
+            case "vol":
+                handleAggregateVolume(parts);
                 break;
-                
             case "avg":
                 handleAggregateAverage(parts);
                 break;
-                
             case "max":
                 handleAggregateMax(parts);
                 break;
-                
             case "filter":
                 handleFilterEvents(parts);
                 break;
-                
             case "status":
                 handleStatus();
                 break;
-                
             case "help":
                 printHelp();
                 break;
-                
             case "quit":
                 running = false;
                 System.out.println("A sair...");
                 break;
-                
             default:
                 System.out.println("Comando desconhecido. Digite 'help' para ajuda.");
         }
@@ -188,23 +176,24 @@ public class ClientMain {
         }
     }
     
-    private void handleAggregateRevenue(String[] parts) throws IOException {
+    private void handleAggregateVolume(String[] parts) throws IOException {
         if (parts.length < 3) {
-            System.out.println("Uso: rev <produto> <dias>");
+            System.out.println("Uso: vol <produto> <dias>");
             return;
         }
-        
         try {
             String product = parts[1];
             int days = Integer.parseInt(parts[2]);
-            
-            double result = client.aggregateRevenue(product, days);
+            double result = client.aggregateVolume(product, days);
             if (result >= 0) {
-                System.out.printf("Receita total: %.2f\n", result);
+                System.out.printf("Volume total: %.2f\n", result);
             } else {
-                System.out.println("Dados insuficientes ou erro");
+                String lastError = client.getLastErrorMessage();
+                if (lastError == null || lastError.isEmpty()) {
+                    lastError = "Dados insuficientes ou erro";
+                }
+                System.out.println("Erro: " + lastError);
             }
-            
         } catch (NumberFormatException e) {
             System.out.println("Dias deve ser um número");
         }
@@ -256,22 +245,18 @@ public class ClientMain {
     
     private void handleFilterEvents(String[] parts) throws IOException {
         if (parts.length < 3) {
-            System.out.println("Uso: filter <dayOffset> <produto1> [produto2] ...");
-            System.out.println("  dayOffset: 0=hoje, 1=ontem, 2=anteontem, etc.");
+            System.out.println("Uso: filter <days> <produto1> [produto2] ...");
+            System.out.println("  days: 1=hoje, 2=hoje+ontem, 3=hoje+ontem+anteontem, etc.");
             return;
         }
-        
         try {
-            int dayOffset = Integer.parseInt(parts[1]);
-            
+            int days = Integer.parseInt(parts[1]);
             // Coletar produtos (do índice 2 em diante)
             java.util.List<String> products = new java.util.ArrayList<>();
             for (int i = 2; i < parts.length; i++) {
                 products.add(parts[i]);
             }
-            
-            java.util.List<geral.Protocol.Event> events = client.filterEvents(products, dayOffset);
-            
+            java.util.List<geral.Protocol.Event> events = client.filterEvents(products, days);
             if (events.isEmpty()) {
                 System.out.println("Nenhum evento encontrado");
             } else {
@@ -286,9 +271,8 @@ public class ClientMain {
                 System.out.println("Total de eventos: " + events.size());
                 System.out.println("==========================\n");
             }
-            
         } catch (NumberFormatException e) {
-            System.out.println("dayOffset deve ser um número");
+            System.out.println("days deve ser um número");
         }
     }
     
@@ -309,10 +293,10 @@ public class ClientMain {
         System.out.println("logout                     - Terminar sessão");
         System.out.println("add <prod> <qty> <price>   - Adicionar evento");
         System.out.println("qty <prod> <days>          - Agregação quantidade");
-        System.out.println("rev <prod> <days>          - Agregação receita");
+        System.out.println("vol <prod> <days>          - Agregação volume de vendas");
         System.out.println("avg <prod> <days>          - Agregação preço médio");
         System.out.println("max <prod> <days>          - Agregação preço máximo");
-        System.out.println("filter <offset> <prod>...  - Filtrar eventos por produto(s)");
+        System.out.println("filter <days> <prod>...    - Filtrar eventos por produto(s)");
         System.out.println("status                     - Ver estado");
         System.out.println("help                       - Mostrar ajuda");
         System.out.println("quit                       - Sair");

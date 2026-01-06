@@ -246,7 +246,7 @@ public class Protocol {
                     break;
                     
                 case OP_SALES_VOLUME:
-                    out.writeDouble(getDouble("revenue"));
+                    out.writeDouble(getDouble("volume"));
                     break;
                     
                 case OP_AVERAGE_PRICE:
@@ -297,7 +297,7 @@ public class Protocol {
                     break;
                     
                 case OP_SALES_VOLUME:
-                    res.data.put("revenue", in.readDouble());
+                    res.data.put("volume", in.readDouble());
                     break;
                     
                 case OP_AVERAGE_PRICE:
