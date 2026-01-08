@@ -3,139 +3,144 @@ package server.persistence;
 import geral.Protocol.Event;
 import geral.Serializer;
 import java.io.*;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 import server.TimeSeriesManager;
 
 /**
- * Persistência de séries temporais.
- * Guarda e carrega séries temporais em formato binário.
+ * Persistência de séries temporais com um ficheiro por dia.
  */
 public class TimeSeriesPersistence {
-    private final String filePath;
+    private final File baseDir;
+    private static final String METADATA_FILE = "metadata.dat";
+    private static final String CURRENT_DAY_FILE = "current.dat";
+    private static final Pattern DAY_FILE_PATTERN = Pattern.compile("day_(\\d+)\\.dat");
     
-    public TimeSeriesPersistence(String filePath) {
-        this.filePath = filePath;
+    public TimeSeriesPersistence(String dirPath) {
+        this.baseDir = new File(dirPath);
+        if (!baseDir.exists()) {
+            baseDir.mkdirs();
+        }
+    }
+
+    /**
+     * Guarda um dia específico no disco.
+     */
+    public void saveDay(int dayId, List<Event> events) throws IOException {
+        File dayFile = new File(baseDir, String.format("day_%d.dat", dayId));
+        writeEventFile(dayFile, events);
+    }
+
+    /**
+     * Lê um dia específico do disco.
+     * Retorna lista vazia se não existir.
+     */
+    public List<Event> loadDay(int dayId) throws IOException {
+        File dayFile = new File(baseDir, String.format("day_%d.dat", dayId));
+        if (!dayFile.exists()) {
+            return new ArrayList<>();
+        }
+        return readEventFile(dayFile);
     }
     
     /**
-     * Guarda o TimeSeriesManager no disco.
-     * @param manager Gestor de séries temporais
-     * @throws IOException se falhar a escrita
+     * Apaga um dia do disco (para limpar dias > D).
      */
-    public void save(TimeSeriesManager manager) throws IOException {
-        File file = new File(filePath);
-        File parent = file.getParentFile();
-        if (parent != null && !parent.exists()) {
-            parent.mkdirs();
-        }
-        
-        try (DataOutputStream out = new DataOutputStream(
-                new BufferedOutputStream(new FileOutputStream(file)))) {
-            
-            // Header
-            out.writeInt(0x54494D45); // "TIME" magic number
-            out.writeInt(2); // Versão 2 (sem TimeSeries)
-            
-            // Configuração
-            out.writeInt(manager.getMaxDays());
-            out.writeInt(manager.getCurrentDayId());
-            
-            // Dia corrente
-            List<Event> currentDayEvents = manager.getCurrentDayEvents();
-            writeEventList(out, currentDayEvents);
-            
-            // Dias históricos
-            List<List<Event>> allEvents = manager.getAllEvents(manager.getHistoricalDayCount());
-            out.writeInt(allEvents.size());
-            
-            for (List<Event> dayEvents : allEvents) {
-                writeEventList(out, dayEvents);
-            }
+    public void deleteDay(int dayId) {
+        File dayFile = new File(baseDir, String.format("day_%d.dat", dayId));
+        if (dayFile.exists()) {
+            dayFile.delete();
         }
     }
     
     /**
-     * Carrega o TimeSeriesManager do disco.
-     * @return Manager carregado ou null se não existir
-     * @throws IOException se falhar a leitura
+     * Guarda o TimeSeriesManager no disco (Metadata e Current Day).
+     * Os dias históricos já devem ser persistidos incrementalmente em newDay().
      */
-    public TimeSeriesManager load() throws IOException {
-        File file = new File(filePath);
+    public void saveState(TimeSeriesManager manager) throws IOException {
+        // 1. Guardar Metadata
+        writeMetadata(manager);
         
-        if (!file.exists()) {
+        // 2. Guardar dia corrente (ainda incompleto)
+        List<Event> currentDayEvents = manager.getCurrentDayEvents();
+        writeEventFile(new File(baseDir, CURRENT_DAY_FILE), currentDayEvents);
+    }
+
+    /**
+     * Carrega o estado do dia corrente para o manager.
+     */
+    public void loadState(TimeSeriesManager manager) throws IOException {
+        List<Event> currentEvents = loadCurrentDay();
+        for (Event event : currentEvents) {
+            manager.addEvent(event);
+        }
+    }
+    
+    /**
+     * Carrega a metadata inicial.
+     * @return int[] {maxDays, currentDayId} ou null se não existir
+     */
+    public int[] loadMetadata() throws IOException {
+        File metaFile = new File(baseDir, METADATA_FILE);
+        if (!metaFile.exists()) {
             return null;
         }
-        
+        return readMetadata();
+    }
+    
+    /**
+     * Carrega o dia corrente incompleto do disco.
+     */
+    public List<Event> loadCurrentDay() throws IOException {
+        File currentFile = new File(baseDir, CURRENT_DAY_FILE);
+        if (currentFile.exists()) {
+            return readEventFile(currentFile);
+        }
+        return new ArrayList<>();
+    }
+    
+    private void writeMetadata(TimeSeriesManager manager) throws IOException {
+        File file = new File(baseDir, METADATA_FILE);
+        try (DataOutputStream out = new DataOutputStream(
+                new BufferedOutputStream(new FileOutputStream(file)))) {
+            out.writeInt(manager.getMaxDays());
+            out.writeInt(manager.getCurrentDayId());
+        }
+    }
+    
+    private int[] readMetadata() throws IOException {
+        File file = new File(baseDir, METADATA_FILE);
         try (DataInputStream in = new DataInputStream(
                 new BufferedInputStream(new FileInputStream(file)))) {
-            
-            // Verificar header
-            int magic = in.readInt();
-            if (magic != 0x54494D45) {
-                throw new IOException("Ficheiro inválido (magic number incorreto)");
-            }
-            
-            int version = in.readInt();
-            if (version == 1) {
-                // Formato antigo com TimeSeries - não suportado
-                throw new IOException("Formato antigo não suportado. Delete o ficheiro e reinicie.");
-            } else if (version != 2) {
-                throw new IOException("Versão não suportada: " + version);
-            }
-            
-            // Configuração
             int maxDays = in.readInt();
-            in.readInt(); // currentDayId é gerido internamente
-            
-            // Criar manager
-            TimeSeriesManager manager = new TimeSeriesManager(maxDays);
-            
-            // Carregar dia corrente
-            List<Event> currentDayEvents = readEventList(in);
-            
-            // Carregar dias históricos
-            int historicalCount = in.readInt();
-            
-            // Restaurar estado
-            // Para cada dia histórico, adicionar eventos e avançar dia
-            for (int i = 0; i < historicalCount; i++) {
-                List<Event> dayEvents = readEventList(in);
-                
-                // Adicionar eventos ao dia corrente
-                for (Event event : dayEvents) {
-                    manager.addEvent(event);
-                }
-                
-                // Avançar para próximo dia
-                manager.newDay();
+            int currentDayId = in.readInt();
+            return new int[]{maxDays, currentDayId};
+        }
+    }
+
+    private void writeEventFile(File file, List<Event> events) throws IOException {
+        try (DataOutputStream out = new DataOutputStream(
+                new BufferedOutputStream(new FileOutputStream(file)))) {
+            out.writeInt(events.size());
+            for (Event event : events) {
+                writeEvent(out, event);
             }
-            
-            // Adicionar eventos do dia corrente final
-            for (Event event : currentDayEvents) {
-                manager.addEvent(event);
-            }
-            
-            return manager;
         }
     }
     
-    /**
-     * Escreve uma lista de eventos.
-     */
-    private void writeEventList(DataOutputStream out, List<Event> events) throws IOException {
-        out.writeInt(events.size());
-        
-        for (Event event : events) {
-            writeEvent(out, event);
+    private List<Event> readEventFile(File file) throws IOException {
+        try (DataInputStream in = new DataInputStream(
+                new BufferedInputStream(new FileInputStream(file)))) {
+            return readEventList(in);
         }
     }
+
+    // Métodos auxiliares de leitura/escrita de eventos
     
-    /**
-     * Lê uma lista de eventos.
-     */
     private List<Event> readEventList(DataInputStream in) throws IOException {
         int eventCount = in.readInt();
-        List<Event> events = new java.util.ArrayList<>();
+        List<Event> events = new ArrayList<>();
         
         for (int i = 0; i < eventCount; i++) {
             Event event = readEvent(in);
@@ -145,18 +150,12 @@ public class TimeSeriesPersistence {
         return events;
     }
     
-    /**
-     * Escreve um evento.
-     */
     private void writeEvent(DataOutputStream out, Event event) throws IOException {
         Serializer.writeString(out, event.getProduct());
         out.writeInt(event.getQuantity());
         out.writeDouble(event.getPrice());
     }
     
-    /**
-     * Lê um evento.
-     */
     private Event readEvent(DataInputStream in) throws IOException {
         String product = Serializer.readString(in);
         int quantity = in.readInt();

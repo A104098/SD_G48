@@ -2,6 +2,8 @@ package client;
 
 import java.io.IOException;
 import java.util.Scanner;
+import java.util.List;
+import java.util.ArrayList;
 
 public class ClientMain {
     private static final String DEFAULT_HOST = "localhost";
@@ -50,152 +52,180 @@ public class ClientMain {
         client.close();
         scanner.close();
     }
-    
-private void handleSimultaneousSales(String[] parts) throws IOException {
-                    if (parts.length < 3) {
-                        System.out.println("Uso: simul <produto1> <produto2>");
-                        return;
-                    }
-                    String p1 = parts[1];
-                    String p2 = parts[2];
-                    
-                    // Executar em thread separada para não bloquear a UI
-                    new Thread(() -> {
-                        try {
-                            System.out.println("Aguardando vendas simultâneas de " + p1 + " e " + p2 + "...");
-                            Boolean result = client.simultaneousSales(p1, p2);
-                            if (result == null) {
-                                System.out.println("\n[NOTIFICAÇÃO] Erro ao aguardar vendas simultâneas");
-                            } else if (result) {
-                                System.out.println("\n[NOTIFICAÇÃO] Ambos os produtos " + p1 + " e " + p2 + " foram vendidos no dia corrente!");
-                            } else {
-                                System.out.println("\n[NOTIFICAÇÃO] O dia terminou sem vendas simultâneas de " + p1 + " e " + p2);
-                            }
-                            System.out.print("> "); // Re-imprimir prompt
-                        } catch (IOException e) {
-                            System.err.println("\n[ERRO] " + e.getMessage());
-                            System.out.print("> ");
-                        }
-                    }, "SimulThread").start();
-                    
-                    System.out.println("Pedido submetido em background. Pode continuar a usar outros comandos.");
-                }
 
-    private void handleConsecutiveSales(String[] parts) throws IOException {
-        if (parts.length < 2) {
-            System.out.println("Uso: consec <n>");
-            return;
-        }
-        try {
-            int n = Integer.parseInt(parts[1]);
-            if (n < 1) {
-                System.out.println("n deve ser >= 1");
-                return;
-            }
-            
-            // Executar em thread separada para não bloquear a UI
-            new Thread(() -> {
-                try {
-                    System.out.println("Aguardando " + n + " vendas consecutivas...");
-                    String product = client.consecutiveSales(n);
-                    if (product != null) {
-                        System.out.println("\n[NOTIFICAÇÃO] Produto com " + n + " vendas consecutivas: " + product);
-                    } else {
-                        System.out.println("\n[NOTIFICAÇÃO] O dia terminou sem " + n + " vendas consecutivas do mesmo produto.");
-                    }
-                    System.out.print("> "); // Re-imprimir prompt
-                } catch (IOException e) {
-                    System.err.println("\n[ERRO] " + e.getMessage());
-                    System.out.print("> ");
-                }
-            }, "ConsecThread").start();
-            
-            System.out.println("Pedido submetido em background. Pode continuar a usar outros comandos.");
-        } catch (NumberFormatException e) {
-            System.out.println("n deve ser um número inteiro");
-        }
-    }
 
     private void processCommand(String line) throws IOException {
-        String[] parts = line.split("\\s+");
-        String command = parts[0].toLowerCase();
+        String command = line.split("\\s+")[0].toLowerCase();
         
+        boolean auth = client.isAuthenticated();
+        
+        // Commands available regardless of auth state
+        if (command.equals("status")) {
+            handleStatus();
+            return;
+        } else if (command.equals("help")) {
+            printHelp();
+            return;
+        } else if (command.equals("quit")) {
+            running = false;
+            System.out.println("A sair...");
+            return;
+        }
+
+        // Unauthenticated-only commands
+        if (!auth) {
+            switch (command) {
+                case "register":
+                    handleRegister();
+                    break;
+                case "login":
+                    handleLogin();
+                    break;
+                default:
+                    System.out.println("Comando não disponível (ou requer autenticação). Digite 'help'.");
+            }
+            return;
+        }
+        
+        // Authenticated-only commands
         switch (command) {
-                        case "simul":
-                            handleSimultaneousSales(parts);
-                            break;
-                        case "consec":
-                            handleConsecutiveSales(parts);
-                            break;
-                
-                
-            case "register":
-                handleRegister(parts);
-                break;
-            case "login":
-                handleLogin(parts);
-                break;
             case "logout":
                 handleLogout();
                 break;
+            case "register":
+            case "login":
+                System.out.println("Já está autenticado. Faça logout primeiro.");
+                break;
             case "add":
-                handleAddEvent(parts);
+                handleAddEvent();
                 break;
-            case "qty":
-                handleAggregateQuantity(parts);
+            case "quantity":
+                handleAggregateQuantity();
                 break;
-            case "vol":
-                handleAggregateVolume(parts);
+            case "volume":
+                handleAggregateVolume();
                 break;
-            case "avg":
-                handleAggregateAverage(parts);
+            case "average":
+                handleAggregateAverage();
                 break;
             case "max":
-                handleAggregateMax(parts);
+                handleAggregateMax();
                 break;
             case "filter":
-                handleFilterEvents(parts);
+                handleFilterEvents();
                 break;
-            case "status":
-                handleStatus();
+            case "simultaneous":
+                handleSimultaneousSales();
                 break;
-            case "help":
-                printHelp();
-                break;
-            case "quit":
-                running = false;
-                System.out.println("A sair...");
+            case "consecutive":
+                handleConsecutiveSales();
                 break;
             default:
                 System.out.println("Comando desconhecido. Digite 'help' para ajuda.");
         }
     }
     
-        
-
-    private void handleRegister(String[] parts) throws IOException {
-        if (parts.length < 3) {
-            System.out.println("Uso: register <username> <password>");
-            return;
-        }
-        
-        boolean success = client.register(parts[1], parts[2]);
-        if (success) {
-            System.out.println("Utilizador registado com sucesso!");
-        } else {
-            System.out.println("Erro ao registar. Username já existe?");
+    private String readString(String prompt) {
+        System.out.print(prompt);
+        return scanner.nextLine().trim();
+    }
+    
+    private int readInt(String prompt) {
+        while (true) {
+            try {
+                String input = readString(prompt);
+                return Integer.parseInt(input);
+            } catch (NumberFormatException e) {
+                System.out.println("Por favor insira um número inteiro válido.");
+            }
         }
     }
     
-    private void handleLogin(String[] parts) throws IOException {
-        if (parts.length < 3) {
-            System.out.println("Uso: login <username> <password>");
+    private double readDouble(String prompt) {
+        while (true) {
+            try {
+                String input = readString(prompt);
+                // Handle comma vs dot if necessary, though Double.parseDouble works with dot
+                return Double.parseDouble(input);
+            } catch (NumberFormatException e) {
+                System.out.println("Por favor insira um número válido (use ponto para decimais).");
+            }
+        }
+    }
+
+    private void handleSimultaneousSales() throws IOException {
+        String p1 = readString("Produto 1: ");
+        String p2 = readString("Produto 2: ");
+
+        // Executar em thread separada para não bloquear a UI
+        new Thread(() -> {
+            try {
+                System.out.println("Aguardando vendas simultâneas de " + p1 + " e " + p2 + "...");
+                Boolean result = client.simultaneousSales(p1, p2);
+                if (result == null) {
+                    System.out.println("\n[NOTIFICAÇÃO] Erro ao aguardar vendas simultâneas");
+                } else if (result) {
+                    System.out.println("\n[NOTIFICAÇÃO] Ambos os produtos " + p1 + " e " + p2 + " foram vendidos no dia corrente!");
+                } else {
+                    System.out.println("\n[NOTIFICAÇÃO] O dia terminou sem vendas simultâneas de " + p1 + " e " + p2);
+                }
+                System.out.print("> "); // Re-imprimir prompt
+            } catch (IOException e) {
+                System.err.println("\n[ERRO] " + e.getMessage());
+                System.out.print("> ");
+            }
+        }, "SimulThread").start();
+
+        System.out.println("Pedido submetido.");
+    }
+
+    private void handleConsecutiveSales() throws IOException {
+        int n = readInt("Número de vendas consecutivas (n): ");
+        if (n < 1) {
+            System.out.println("n deve ser >= 1");
             return;
         }
+
+        // Executar em thread separada para não bloquear a UI
+        new Thread(() -> {
+            try {
+                System.out.println("Aguardando " + n + " vendas consecutivas...");
+                String product = client.consecutiveSales(n);
+                if (product != null) {
+                    System.out.println("\n[NOTIFICAÇÃO] Produto com " + n + " vendas consecutivas: " + product);
+                } else {
+                    System.out.println("\n[NOTIFICAÇÃO] O dia terminou sem " + n + " vendas consecutivas do mesmo produto.");
+                }
+                System.out.print("> "); // Re-imprimir prompt
+            } catch (IOException e) {
+                System.err.println("\n[ERRO] " + e.getMessage());
+                System.out.print("> ");
+            }
+        }, "ConsecThread").start();
+
+        System.out.println("Pedido submetido.");
+    }
+
+    private void handleRegister() throws IOException {
+        String username = readString("Username: ");
+        String password = readString("Password: ");
         
-        boolean success = client.login(parts[1], parts[2]);
+        boolean success = client.register(username, password);
         if (success) {
-            System.out.println("Login bem-sucedido! Bem-vindo " + parts[1]);
+            System.out.println("Utilizador registado com sucesso!");
+        } else {
+            System.out.println("Erro ao registar. Username já existe");
+        }
+    }
+    
+    private void handleLogin() throws IOException {
+        String username = readString("Username: ");
+        String password = readString("Password: ");
+        
+        boolean success = client.login(username, password);
+        if (success) {
+            System.out.println("Login bem-sucedido! Bem-vindo " + username);
+            printHelp();
         } else {
             System.out.println("Login falhou. Credenciais inválidas?");
         }
@@ -210,144 +240,104 @@ private void handleSimultaneousSales(String[] parts) throws IOException {
         }
     }
     
-    private void handleAddEvent(String[] parts) throws IOException {
-        if (parts.length < 4) {
-            System.out.println("Uso: add <produto> <quantidade> <preço>");
+    private void handleAddEvent() throws IOException {
+        String product = readString("Produto: ");
+        int quantity = readInt("Quantidade: ");
+        double price = readDouble("Preço: ");
+        
+        boolean success = client.addEvent(product, quantity, price);
+        System.out.println(success ? "Evento adicionado" : "Erro ao adicionar evento");
+    }
+    
+    private void handleAggregateQuantity() throws IOException {
+        String product = readString("Produto: ");
+        int days = readInt("Dias: ");
+        
+        int result = client.aggregateQuantity(product, days);
+        if (result >= 0) {
+            System.out.println("Quantidade total: " + result);
+        } else {
+            System.out.println("Dados insuficientes ou erro");
+        }
+    }
+    
+    private void handleAggregateVolume() throws IOException {
+        String product = readString("Produto: ");
+        int days = readInt("Dias: ");
+
+        double result = client.aggregateVolume(product, days);
+        if (result >= 0) {
+            System.out.printf("Volume total: %.2f\n", result);
+        } else {
+            String lastError = client.getLastErrorMessage();
+            if (lastError == null || lastError.isEmpty()) {
+                lastError = "Dados insuficientes ou erro";
+            }
+            System.out.println("Erro: " + lastError);
+        }
+    }
+    
+    private void handleAggregateAverage() throws IOException {
+        String product = readString("Produto: ");
+        int days = readInt("Dias: ");
+        
+        double result = client.aggregateAverage(product, days);
+        if (result >= 0) {
+            System.out.printf("Preço médio: %.2f\n", result);
+        } else {
+            System.out.println("Dados insuficientes ou erro");
+        }
+    }
+    
+    private void handleAggregateMax() throws IOException {
+        String product = readString("Produto: ");
+        int days = readInt("Dias: ");
+        
+        double result = client.aggregateMaxPrice(product, days);
+        if (result >= 0) {
+            System.out.printf("Preço máximo: %.2f\n", result);
+        } else {
+            System.out.println("Dados insuficientes ou erro");
+        }
+    }
+    
+    private void handleFilterEvents() throws IOException {
+        System.out.println("1=ontem, 2=anteontem, etc.");
+        int days = readInt("Número do dia: ");
+        if (days < 0) {
+            System.out.println("dia inválido");
             return;
+        }
+
+        List<String> products = new ArrayList<>();
+        System.out.println("Insira os produtos a filtrar (uma linha vazia para terminar):");
+        while (true) {
+            String prod = readString("Produto > ");
+            if (prod.isEmpty()) {
+                break;
+            }
+            products.add(prod);
         }
         
-        try {
-            String product = parts[1];
-            int quantity = Integer.parseInt(parts[2]);
-            double price = Double.parseDouble(parts[3]);
-            
-            boolean success = client.addEvent(product, quantity, price);
-            System.out.println(success ? "Evento adicionado" : "Erro ao adicionar evento");
-            
-        } catch (NumberFormatException e) {
-            System.out.println("Quantidade e preço devem ser números");
-        }
-    }
-    
-    private void handleAggregateQuantity(String[] parts) throws IOException {
-        if (parts.length < 3) {
-            System.out.println("Uso: qty <produto> <dias>");
+        if (products.isEmpty()) {
+            System.out.println("Nenhum produto selecionado.");
             return;
         }
-        
-        try {
-            String product = parts[1];
-            int days = Integer.parseInt(parts[2]);
-            
-            int result = client.aggregateQuantity(product, days);
-            if (result >= 0) {
-                System.out.println("Quantidade total: " + result);
-            } else {
-                System.out.println("Dados insuficientes ou erro");
+
+        List<geral.Protocol.Event> events = client.filterEvents(products, days);
+        if (events.isEmpty()) {
+            System.out.println("Nenhum evento encontrado");
+        } else {
+            System.out.println("\n=== Eventos Encontrados ===");
+            for (geral.Protocol.Event event : events) {
+                System.out.printf("%s: %d unidades a %.2f EUR = %.2f EUR\n",
+                    event.getProduct(), 
+                    event.getQuantity(), 
+                    event.getPrice(),
+                    event.getTotalValue());
             }
-            
-        } catch (NumberFormatException e) {
-            System.out.println("Dias deve ser um número");
-        }
-    }
-    
-    private void handleAggregateVolume(String[] parts) throws IOException {
-        if (parts.length < 3) {
-            System.out.println("Uso: vol <produto> <dias>");
-            return;
-        }
-        try {
-            String product = parts[1];
-            int days = Integer.parseInt(parts[2]);
-            double result = client.aggregateVolume(product, days);
-            if (result >= 0) {
-                System.out.printf("Volume total: %.2f\n", result);
-            } else {
-                String lastError = client.getLastErrorMessage();
-                if (lastError == null || lastError.isEmpty()) {
-                    lastError = "Dados insuficientes ou erro";
-                }
-                System.out.println("Erro: " + lastError);
-            }
-        } catch (NumberFormatException e) {
-            System.out.println("Dias deve ser um número");
-        }
-    }
-    
-    private void handleAggregateAverage(String[] parts) throws IOException {
-        if (parts.length < 3) {
-            System.out.println("Uso: avg <produto> <dias>");
-            return;
-        }
-        
-        try {
-            String product = parts[1];
-            int days = Integer.parseInt(parts[2]);
-            
-            double result = client.aggregateAverage(product, days);
-            if (result >= 0) {
-                System.out.printf("Preço médio: %.2f\n", result);
-            } else {
-                System.out.println("Dados insuficientes ou erro");
-            }
-            
-        } catch (NumberFormatException e) {
-            System.out.println("Dias deve ser um número");
-        }
-    }
-    
-    private void handleAggregateMax(String[] parts) throws IOException {
-        if (parts.length < 3) {
-            System.out.println("Uso: max <produto> <dias>");
-            return;
-        }
-        
-        try {
-            String product = parts[1];
-            int days = Integer.parseInt(parts[2]);
-            
-            double result = client.aggregateMaxPrice(product, days);
-            if (result >= 0) {
-                System.out.printf("Preço máximo: %.2f\n", result);
-            } else {
-                System.out.println("Dados insuficientes ou erro");
-            }
-            
-        } catch (NumberFormatException e) {
-            System.out.println("Dias deve ser um número");
-        }
-    }
-    
-    private void handleFilterEvents(String[] parts) throws IOException {
-        if (parts.length < 3) {
-            System.out.println("Uso: filter <days> <produto1> [produto2] ...");
-            System.out.println("  days: 1=hoje, 2=hoje+ontem, 3=hoje+ontem+anteontem, etc.");
-            return;
-        }
-        try {
-            int days = Integer.parseInt(parts[1]);
-            // Coletar produtos (do índice 2 em diante)
-            java.util.List<String> products = new java.util.ArrayList<>();
-            for (int i = 2; i < parts.length; i++) {
-                products.add(parts[i]);
-            }
-            java.util.List<geral.Protocol.Event> events = client.filterEvents(products, days);
-            if (events.isEmpty()) {
-                System.out.println("Nenhum evento encontrado");
-            } else {
-                System.out.println("\n=== Eventos Encontrados ===");
-                for (geral.Protocol.Event event : events) {
-                    System.out.printf("%s: %d unidades a %.2f EUR = %.2f EUR\n",
-                        event.getProduct(), 
-                        event.getQuantity(), 
-                        event.getPrice(),
-                        event.getTotalValue());
-                }
-                System.out.println("Total de eventos: " + events.size());
-                System.out.println("==========================\n");
-            }
-        } catch (NumberFormatException e) {
-            System.out.println("days deve ser um número");
+            System.out.println("Total de eventos: " + events.size());
+            System.out.println("==========================\n");
         }
     }
     
@@ -363,20 +353,30 @@ private void handleSimultaneousSales(String[] parts) throws IOException {
     
     private void printHelp() {
         System.out.println("\n=== Comandos Disponíveis ===");
-        System.out.println("register <user> <pass>     - Registar novo utilizador");
-        System.out.println("login <user> <pass>        - Autenticar");
-        System.out.println("logout                     - Terminar sessão");
-        System.out.println("add <prod> <qty> <price>   - Adicionar evento");
-        System.out.println("qty <prod> <days>          - Agregação quantidade");
-        System.out.println("vol <prod> <days>          - Agregação volume de vendas");
-        System.out.println("avg <prod> <days>          - Agregação preço médio");
-        System.out.println("max <prod> <days>          - Agregação preço máximo");
-        System.out.println("filter <days> <prod>...    - Filtrar eventos por produto(s)");
-        System.out.println("simul <p1> <p2>            - Espera vendas simultâneas de dois produtos no dia corrente");
-        System.out.println("consec <n>                 - Espera n vendas consecutivas do mesmo produto no dia corrente");
-        System.out.println("status                     - Ver estado");
-        System.out.println("help                       - Mostrar ajuda");
-        System.out.println("quit                       - Sair");
+        
+        boolean auth = client.isAuthenticated();
+        
+        if (!auth) {
+            // Comandos para utilizadores NÃO autenticados
+            System.out.println("register       - Registar novo utilizador");
+            System.out.println("login          - Autenticar");
+        } else {
+            // Comandos para utilizadores autenticados
+            System.out.println("logout         - Terminar sessão");
+            System.out.println("add            - Adicionar evento");
+            System.out.println("quantity       - Agregação da quantidade nos n últimos dias");
+            System.out.println("volume         - Agregação do volume de vendas nos n últimos dias");
+            System.out.println("average        - Agregação do preço médio nos n últimos dias");
+            System.out.println("max            - Agregação do preço máximo nos n últimos dias");
+            System.out.println("filter         - Filtrar eventos por produto(s) num dia");
+            System.out.println("simultaneous   - Espera vendas simultâneas de dois produtos");
+            System.out.println("consecutive    - Espera n vendas consecutivas do mesmo produto");
+        }
+        
+        // Comandos comuns
+        System.out.println("status         - Ver estado");
+        System.out.println("help           - Mostrar ajuda");
+        System.out.println("quit           - Sair");
         System.out.println("=============================\n");
     }
     

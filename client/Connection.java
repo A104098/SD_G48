@@ -40,8 +40,7 @@ public class Connection implements AutoCloseable {
     }
     
     /**
-     * Envia um pedido e aguarda a response (thread-safe com Demultiplexer).
-     * Múltiplas threads podem chamar isto concorrentemente sem se bloquearem.
+     Envia um pedido e aguarda a response (thread-safe com Demultiplexer).
      */
     private Protocol.Response sendRequest(Protocol.Request request) throws IOException {
         if (!isConnected()) {

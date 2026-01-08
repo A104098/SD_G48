@@ -10,25 +10,19 @@ import java.net.Socket;
 import java.util.List;
 
 //Handler para uma conexão de cliente.
-//Processa pedidos e envia respostas usando o protocolo com Demultiplexer
+//Processa pedidos e envia respostas usando o protocolo
 //Submete cada request como tarefa independente à ThreadPool para processamento concorrente
 public class ClientHandler implements Runnable {
     private final Socket socket;
     private final ServerManager serverManager;
-    private final TimeSeriesManager tsManager;
-    private final AggregationService aggregationService;
     private final ThreadPool threadPool;
     private DataInputStream in;
     private DataOutputStream out;
     private User authenticatedUser;
     
-    public ClientHandler(Socket socket, ServerManager serverManager, 
-                        TimeSeriesManager tsManager, AggregationService aggregationService,
-                        ThreadPool threadPool) {
+    public ClientHandler(Socket socket, ServerManager serverManager, ThreadPool threadPool) {
         this.socket = socket;
         this.serverManager = serverManager;
-        this.tsManager = tsManager;
-        this.aggregationService = aggregationService;
         this.threadPool = threadPool;
         this.authenticatedUser = null;
     }
@@ -45,21 +39,18 @@ public class ClientHandler implements Runnable {
             while (!socket.isClosed()) {
                 // Ler tag (do Demultiplexer)
                 int tag = in.readInt();
-                
                 // Ler tamanho do request
                 int requestLen = in.readInt();
-                
                 // Ler dados do request
                 byte[] requestData = new byte[requestLen];
                 in.readFully(requestData);
-                
+
                 // Desserializar request
                 ByteArrayInputStream bais = new ByteArrayInputStream(requestData);
                 DataInputStream dis = new DataInputStream(bais);
                 Protocol.Request request = Protocol.Request.readFrom(dis);
                 
                 // Submeter tarefa à ThreadPool para processar este request
-                // Cada request é processado em paralelo - simul pode bloquear enquanto add executa
                 threadPool.execute(() -> {
                     try {
                         // Processar request
@@ -72,8 +63,7 @@ public class ClientHandler implements Runnable {
                         dos.flush();
                         byte[] responseData = baos.toByteArray();
                         
-                        // Enviar response com Demultiplexer format (tag + len + data)
-                        // synchronized porque múltiplas threads podem escrever simultaneamente
+                        // Enviar response com formato Demultiplexer
                         synchronized (out) {
                             out.writeInt(tag);
                             out.writeInt(responseData.length);
@@ -142,6 +132,7 @@ public class ClientHandler implements Runnable {
         boolean success = serverManager.register(username, password);
         
         if (success) {
+            System.out.println("Utilizador registado: " + username);
             return Protocol.Response.success(request.getRequestId());
         } else {
             return Protocol.Response.error(request.getRequestId(), 
@@ -162,6 +153,7 @@ public class ClientHandler implements Runnable {
         
         if (user != null) {
             authenticatedUser = user;
+            System.out.println("Utilizador autenticado: " + username);
             return Protocol.Response.success(request.getRequestId());
         } else {
             return Protocol.Response.error(request.getRequestId(), 
@@ -175,6 +167,7 @@ public class ClientHandler implements Runnable {
                 Protocol.STATUS_NOT_AUTHENTICATED, "Não autenticado");
         }
         
+        System.out.println("Utilizador desconectado: " + authenticatedUser.getUsername());
         authenticatedUser = null;
         return Protocol.Response.success(request.getRequestId());
     }
@@ -195,8 +188,9 @@ public class ClientHandler implements Runnable {
         }
         
         try {
-            tsManager.addEvent(product, quantity, price);
-            aggregationService.invalidateOnNewEvent(product);
+            serverManager.addEvent(product, quantity, price);
+            System.out.println("Utilizador: " + authenticatedUser.getUsername() 
+                + " adicionou Evento: produto:" + product + ", quantidade:" + quantity + ", preço:" + price);
             return Protocol.Response.success(request.getRequestId());
         } catch (Exception e) {
             return Protocol.Response.error(request.getRequestId(), 
@@ -218,15 +212,17 @@ public class ClientHandler implements Runnable {
                 Protocol.STATUS_INVALID_PARAMS, "Parâmetros inválidos");
         }
         
-        int result = aggregationService.aggregateQuantity(product, days);
+        AggregationService.AggregationResult<Integer> result = serverManager.aggregateQuantity(product, days);
         
-        if (result == -1) {
+        if (result.value == -1) {
             return Protocol.Response.error(request.getRequestId(), 
-                Protocol.STATUS_ERROR, "Dados insuficientes");
+                Protocol.STATUS_ERROR, result.warning != null ? result.warning : "Dados insuficientes");
         }
         
+        System.out.println("Utilizador: " + authenticatedUser.getUsername() + " consultou Quantidade: produto:" + product + ", dias:" + days + ")");
+        
         return Protocol.Response.success(request.getRequestId())
-            .setData("quantity", result);
+            .setData("quantity", result.value);
     }
     
     private Protocol.Response handleSalesVolume(Protocol.Request request) {
@@ -243,13 +239,16 @@ public class ClientHandler implements Runnable {
                 Protocol.STATUS_INVALID_PARAMS, "Parâmetros inválidos");
         }
         
-        double result = aggregationService.aggregateVolume(product, days);
-        if (result == -1) {
+        AggregationService.AggregationResult<Double> result = serverManager.aggregateVolume(product, days);
+        if (result.value == -1) {
             return Protocol.Response.error(request.getRequestId(), 
-                Protocol.STATUS_ERROR, "Dados insuficientes");
+                Protocol.STATUS_ERROR, result.warning != null ? result.warning : "Dados insuficientes");
         }
+        
+        System.out.println("Utilizador: " + authenticatedUser.getUsername() + " consultou Volume: produto:" + product + ", dias:" + days + ")");
+        
         return Protocol.Response.success(request.getRequestId())
-            .setData("volume", result);
+            .setData("volume", result.value);
     }
     
     private Protocol.Response handleAveragePrice(Protocol.Request request) {
@@ -266,15 +265,17 @@ public class ClientHandler implements Runnable {
                 Protocol.STATUS_INVALID_PARAMS, "Parâmetros inválidos");
         }
         
-        double result = aggregationService.aggregateAveragePrice(product, days);
+        AggregationService.AggregationResult<Double> result = serverManager.aggregateAveragePrice(product, days);
         
-        if (result == -1) {
+        if (result.value == -1) {
             return Protocol.Response.error(request.getRequestId(), 
-                Protocol.STATUS_ERROR, "Dados insuficientes");
+                Protocol.STATUS_ERROR, result.warning != null ? result.warning : "Dados insuficientes");
         }
         
+        System.out.println("Utilizador: " + authenticatedUser.getUsername() + " consultou Preço Médio: produto:" + product + ", dias:" + days + ")");
+
         return Protocol.Response.success(request.getRequestId())
-            .setData("avgPrice", result);
+            .setData("avgPrice", result.value);
     }
 
     private Protocol.Response handleMaxPrice(Protocol.Request request) {
@@ -291,15 +292,17 @@ public class ClientHandler implements Runnable {
                 Protocol.STATUS_INVALID_PARAMS, "Parâmetros inválidos");
         }
         
-        double result = aggregationService.aggregateMaxPrice(product, days);
+        AggregationService.AggregationResult<Double> result = serverManager.aggregateMaxPrice(product, days);
         
-        if (result == -1) {
+        if (result.value == -1) {
             return Protocol.Response.error(request.getRequestId(), 
-                Protocol.STATUS_ERROR, "Dados insuficientes");
+                Protocol.STATUS_ERROR, result.warning != null ? result.warning : "Dados insuficientes");
         }
         
+        System.out.println("Utilizador: " + authenticatedUser.getUsername() + " consultou Preço Máximo: produto:" + product + ", dias:" + days + ")");
+        
         return Protocol.Response.success(request.getRequestId())
-            .setData("maxPrice", result);
+            .setData("maxPrice", result.value);
     }
 
     private Protocol.Response handleFilterEvents(Protocol.Request request) {
@@ -321,7 +324,9 @@ public class ClientHandler implements Runnable {
                 Protocol.STATUS_INVALID_PARAMS, "Offset inválido");
         }
         
-        List<Protocol.Event> events = tsManager.getFilteredEvents(products, dayOffset);
+        List<Protocol.Event> events = serverManager.getFilteredEvents(products, dayOffset);
+        
+        System.out.println("Utilizador: " + authenticatedUser.getUsername() + " filtrou eventos: produto(s):" + products + " (dia: " + dayOffset + ")");
         
         return Protocol.Response.success(request.getRequestId())
             .setData("events", events);
@@ -337,7 +342,8 @@ public class ClientHandler implements Runnable {
         if (product1 == null || product2 == null) {
             return Protocol.Response.error(request.getRequestId(), Protocol.STATUS_INVALID_PARAMS, "Parâmetros inválidos");
         }
-        boolean result = tsManager.waitForSimultaneousSales(product1, product2);
+        boolean result = serverManager.waitForSimultaneousSales(product1, product2);
+        System.out.println("Utilizador: " + authenticatedUser.getUsername() + " aguardou Simultanêas: produto1:" + product1 + ", produto2:" + product2 + " (" + result + ")");
         return Protocol.Response.success(request.getRequestId()).setData("result", result);
     }
     
@@ -350,7 +356,8 @@ public class ClientHandler implements Runnable {
         if (n == null || n < 1) {
             return Protocol.Response.error(request.getRequestId(), Protocol.STATUS_INVALID_PARAMS, "Parâmetro n inválido");
         }
-        String product = tsManager.waitForConsecutiveSales(n);
+        String product = serverManager.waitForConsecutiveSales(n);
+        System.out.println("Utilizador: " + authenticatedUser.getUsername() + " aguardou Consecutivas: n:" + n + " (produto: " + product + ")");
         return Protocol.Response.success(request.getRequestId()).setData("product", product);
     }
     

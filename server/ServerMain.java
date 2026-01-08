@@ -5,19 +5,18 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Scanner;
 import java.util.concurrent.atomic.AtomicBoolean;
-import server.cache.ProductCache;
 import server.persistence.PersistenceManager;
 
 
 public class ServerMain {
     private static final int DEFAULT_PORT = 12345;
     private static final int DEFAULT_D = 30; // Dias históricos
-    private static final int DEFAULT_S = 100; // Séries em cache
+    private static final int DEFAULT_S = 10; // Séries em cache
     
     private final int port;
     private final ServerManager serverManager;
+    private final Authentication auth;
     private TimeSeriesManager tsManager;
-    private final ProductCache cache;
     private final AggregationService aggregationService;
     private final ThreadPool threadPool;
     private final AtomicBoolean running;
@@ -26,21 +25,22 @@ public class ServerMain {
     
     public ServerMain(int port, int maxDays, int maxSeries) {
         this.port = port;
-        this.serverManager = new ServerManager();
+        this.auth = new Authentication();
         this.persistenceManager = new PersistenceManager();
         
         // Tentar carregar dados persistidos
         try {
-            this.tsManager = persistenceManager.loadAll(serverManager, maxDays);
+            this.tsManager = persistenceManager.loadAll(auth, maxDays, maxSeries);
         } catch (IOException e) {
             System.err.println("Erro ao carregar dados: " + e.getMessage());
             System.err.println("Criando novo estado...");
-            this.tsManager = new TimeSeriesManager(maxDays);
+            this.tsManager = new TimeSeriesManager(maxDays, maxSeries, persistenceManager.getTimeSeriesPersistence());
         }
         
-        this.cache = new ProductCache(maxSeries);
-        this.aggregationService = new AggregationService(tsManager, cache);
-        this.threadPool = new ThreadPool(Math.max(4, Runtime.getRuntime().availableProcessors()));
+        this.aggregationService = new AggregationService(tsManager);
+        this.tsManager.setAggregationService(aggregationService);
+        this.serverManager = new ServerManager(auth, tsManager, aggregationService);
+        this.threadPool = new ThreadPool(20);
         this.running = new AtomicBoolean(false);
     }
     
@@ -54,7 +54,7 @@ public class ServerMain {
         running.set(true);
         
         System.out.println("Servidor iniciado na porta " + port);
-        System.out.println("Configuração: D=" + tsManager.getMaxDays() + ", S=" + cache.getMaxSeries());
+        System.out.println("Configuração: D=" + tsManager.getMaxDays());
         System.out.println("Comandos: 'newday' para simular novo dia, 'stats' para estatísticas, 'quit' para sair");
         
         // Thread para aceitar conexões
@@ -77,12 +77,11 @@ public class ServerMain {
                 ClientHandler handler = new ClientHandler(
                     clientSocket,
                     serverManager,
-                    tsManager,
-                    aggregationService,
                     threadPool
                 );
                 
-                threadPool.execute(handler);
+                // NOTA: O handler corre numa Thread dedicada por cliente (IO-bound),libertando a ThreadPool para tarefas de processamento (CPU-bound)
+                new Thread(handler).start();
                 
             } catch (IOException e) {
                 if (running.get()) {
@@ -140,47 +139,38 @@ public class ServerMain {
     private void simulateNewDay() {
         int oldDay = tsManager.getCurrentDayId();
         tsManager.newDay();
-        aggregationService.invalidateOnNewDay();
         int newDay = tsManager.getCurrentDayId();
         
         System.out.println("Novo dia simulado: " + oldDay + " -> " + newDay);
-        System.out.println("Cache invalidado");
         
         // Guardar automaticamente após mudança de dia
         try {
-            persistenceManager.saveAll(serverManager, tsManager);
+            persistenceManager.saveAll(auth, tsManager);
         } catch (IOException e) {
             System.err.println("Erro ao guardar dados: " + e.getMessage());
         }
     }
     
-    /**
-     * Guarda os dados no disco.
-     */
+    //Guarda os dados no disco
     private void saveData() {
         try {
-            persistenceManager.saveAll(serverManager, tsManager);
+            persistenceManager.saveAll(auth, tsManager);
         } catch (IOException e) {
             System.err.println("Erro ao guardar dados: " + e.getMessage());
         }
     }
     
-    /**
-     * Imprime estatísticas do servidor.
-     */
+    //Imprime estatísticas do servidor
     private void printStatistics() {
         System.out.println("\n=== Estatísticas do Servidor ===");
         System.out.println("Utilizadores registados: " + serverManager.getUserCount());
         System.out.println("Dia corrente: " + tsManager.getCurrentDayId());
         System.out.println("Eventos hoje: " + tsManager.getCurrentDayEventCount());
         System.out.println("Dias históricos: " + tsManager.getHistoricalDayCount() + "/" + tsManager.getMaxDays());
-        System.out.println("Cache: " + cache.size() + "/" + cache.getMaxSeries());
         System.out.println("================================\n");
     }
     
-    /**
-     * Imprime ajuda dos comandos.
-     */
+    //Imprime ajuda dos comandos
     private void printHelp() {
         System.out.println("\n=== Comandos Disponíveis ===");
         System.out.println("newday  - Simula o início de um novo dia");
@@ -190,9 +180,7 @@ public class ServerMain {
         System.out.println("============================\n");
     }
     
-    /**
-     * Encerra o servidor gracefully.
-     */
+    //Encerra o servidor
     public void shutdown() {
         if (!running.get()) {
             return;
@@ -202,7 +190,7 @@ public class ServerMain {
         
         // Guardar dados antes de encerrar
         try {
-            persistenceManager.saveAll(serverManager, tsManager);
+            persistenceManager.saveAll(auth, tsManager);
         } catch (IOException e) {
             System.err.println("Erro ao guardar dados: " + e.getMessage());
         }
@@ -220,10 +208,8 @@ public class ServerMain {
         threadPool.stop();
         System.out.println("Servidor encerrado");
     }
-    
-    /**
-     * Ponto de entrada do servidor.
-     */
+
+
     public static void main(String[] args) {
         int port = DEFAULT_PORT;
         int maxDays = DEFAULT_D;

@@ -2,7 +2,7 @@ package server.persistence;
 
 import java.io.IOException;
 import java.util.List;
-import server.ServerManager;
+import server.Authentication;
 import server.TimeSeriesManager;
 import server.User;
 
@@ -13,7 +13,7 @@ import server.User;
 public class PersistenceManager {
     private static final String DEFAULT_DATA_DIR = "data";
     private static final String USERS_FILE = "users.dat";
-    private static final String TIMESERIES_FILE = "timeseries.dat";
+    private static final String TIMESERIES_DIR = "timeseries";
     
     private final String dataDirectory;
     private final UserPersistence userPersistence;
@@ -26,27 +26,27 @@ public class PersistenceManager {
     public PersistenceManager(String dataDirectory) {
         this.dataDirectory = dataDirectory;
         this.userPersistence = new UserPersistence(dataDirectory + "/" + USERS_FILE);
-        this.timeSeriesPersistence = new TimeSeriesPersistence(dataDirectory + "/" + TIMESERIES_FILE);
+        this.timeSeriesPersistence = new TimeSeriesPersistence(dataDirectory + "/" + TIMESERIES_DIR);
     }
     
     /**
      * Guarda todos os dados do servidor.
-     * @param serverManager Gestor de autenticação
+     * @param auth Gestor de autenticação
      * @param tsManager Gestor de séries temporais
      * @throws IOException se falhar a escrita
      */
-    public void saveAll(ServerManager serverManager, TimeSeriesManager tsManager) throws IOException {
+    public void saveAll(Authentication auth, TimeSeriesManager tsManager) throws IOException {
         System.out.println("A guardar dados...");
         
         // Guardar utilizadores
-        List<User> users = getAllUsers(serverManager);
+        List<User> users = getAllUsers(auth);
         userPersistence.save(users);
         System.out.println("  - Utilizadores: " + users.size());
         
         // Guardar séries temporais
-        timeSeriesPersistence.save(tsManager);
+        timeSeriesPersistence.saveState(tsManager);
         System.out.println("  - Dia corrente: " + tsManager.getCurrentDayId());
-        System.out.println("  - Dias históricos: " + tsManager.getHistoricalDayCount());
+        System.out.println("  - Dias históricos (total): " + tsManager.getHistoricalDayCount());
         System.out.println("  - Eventos hoje: " + tsManager.getCurrentDayEventCount());
         
         System.out.println("Dados guardados com sucesso!");
@@ -54,31 +54,43 @@ public class PersistenceManager {
     
     /**
      * Carrega todos os dados do servidor.
-     * @param serverManager Gestor de autenticação (será preenchido)
-     * @param maxDays Valor de D para criar TimeSeriesManager se necessário
+     * @param auth Gestor de autenticação (será preenchido)
+     * @param maxDays Valor de D (D)
+     * @param maxMemoryDays Valor de S (S)
      * @return TimeSeriesManager carregado ou novo se não existir
      * @throws IOException se falhar a leitura
      */
-    public TimeSeriesManager loadAll(ServerManager serverManager, int maxDays) throws IOException {
+    public TimeSeriesManager loadAll(Authentication auth, int maxDays, int maxMemoryDays) throws IOException {
         System.out.println("A carregar dados...");
         
         // Carregar utilizadores
         List<User> users = userPersistence.load();
-        for (User user : users) {
-            serverManager.register(user);
+        if (users != null) {
+            for (User user : users) {
+                auth.register(user);
+            }
+            System.out.println("  - Utilizadores: " + users.size());
+        } else {
+             System.out.println("  - Utilizadores: 0");
         }
-        System.out.println("  - Utilizadores: " + users.size());
         
         // Carregar séries temporais
-        TimeSeriesManager tsManager = timeSeriesPersistence.load();
+        TimeSeriesManager tsManager;
+        int[] meta = timeSeriesPersistence.loadMetadata();
         
-        if (tsManager == null) {
+        if (meta == null) {
             System.out.println("  - Nenhuma série temporal encontrada, criando nova");
-            tsManager = new TimeSeriesManager(maxDays);
+             // Nota: timeSeriesPersistence é uma instância da classe, precisamos passá-la
+            tsManager = new TimeSeriesManager(maxDays, maxMemoryDays, timeSeriesPersistence);
         } else {
+            // Recriar usando configuração atual (maxMemoryDays)
+            tsManager = new TimeSeriesManager(maxDays, maxMemoryDays, timeSeriesPersistence);
+            timeSeriesPersistence.loadState(tsManager);
+            tsManager.setCurrentDayId(meta[1]);
+            // Nota: historicalDays começa vazio, será populado lazy
+            
             System.out.println("  - Dia corrente: " + tsManager.getCurrentDayId());
-            System.out.println("  - Dias históricos: " + tsManager.getHistoricalDayCount());
-            System.out.println("  - Eventos hoje: " + tsManager.getCurrentDayEventCount());
+            System.out.println("  - Dias históricos (total): " + tsManager.getHistoricalDayCount());
         }
         
         System.out.println("Dados carregados com sucesso!");
@@ -87,11 +99,11 @@ public class PersistenceManager {
     
     /**
      * Guarda apenas utilizadores.
-     * @param serverManager Gestor de autenticação
+     * @param auth Gestor de autenticação
      * @throws IOException se falhar a escrita
      */
-    public void saveUsers(ServerManager serverManager) throws IOException {
-        List<User> users = getAllUsers(serverManager);
+    public void saveUsers(Authentication auth) throws IOException {
+        List<User> users = getAllUsers(auth);
         userPersistence.save(users);
     }
     
@@ -101,19 +113,14 @@ public class PersistenceManager {
      * @throws IOException se falhar a escrita
      */
     public void saveTimeSeries(TimeSeriesManager tsManager) throws IOException {
-        timeSeriesPersistence.save(tsManager);
+        timeSeriesPersistence.saveState(tsManager);
     }
     
     /**
-     * Obtém todos os utilizadores do ServerManager.
-     * Como não temos um método público para isso, usamos reflexão ou
-     * adicionamos um método no ServerManager.
+     * Obtém todos os utilizadores do Authentication.
      */
-    private List<User> getAllUsers(ServerManager serverManager) {
-        // NOTA: Isto requer adicionar um método getAllUsers() no ServerManager
-        // Por agora, retornamos lista vazia se não tivermos acesso
-        // Vou assumir que vamos adicionar esse método
-        return serverManager.getAllUsers();
+    private List<User> getAllUsers(Authentication auth) {
+        return auth.getAllUsers();
     }
     
     /**
@@ -122,5 +129,9 @@ public class PersistenceManager {
      */
     public String getDataDirectory() {
         return dataDirectory;
+    }
+
+    public TimeSeriesPersistence getTimeSeriesPersistence() {
+        return timeSeriesPersistence;
     }
 }

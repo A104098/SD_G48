@@ -1,21 +1,29 @@
 package server;
 
 import geral.Protocol;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import server.persistence.TimeSeriesPersistence;
 
 /*
 Gestor de séries temporais.
 Gere o dia corrente e os D dias anteriores.
-Thread-safe para operações concorrentes.
  */
+
 public class TimeSeriesManager {
-    private final int maxDays; // D - número máximo de dias históricos
-    private final List<DayData> historicalDays; // Dias completos
+    private final int maxDays; // D - número máximo de dias históricos (disco)
+    private final int maxMemoryDays; // S - número máximo de dias em memória
+    private final TimeSeriesPersistence persistence;
+    
+    private final List<DayData> historicalDays; // Dias completos em memória
     private DayData currentDay; // Dia corrente
     private int currentDayId; // ID do dia corrente
     private final ReentrantReadWriteLock lock;
+    private final Condition newEventCondition;
+    private AggregationService aggregationService; // Referência para invalidar cache
     
     // Classe interna para representar os dados de um dia
     private static class DayData {
@@ -30,42 +38,61 @@ public class TimeSeriesManager {
             this.startTime = System.currentTimeMillis();
             this.completed = false;
         }
+        
+        // Construtor para carregar do disco (sem metadados de tempo)
+        DayData(int dayId, List<Protocol.Event> events) {
+            this.dayId = dayId;
+            this.events = events;
+            this.startTime = 0;
+            this.completed = true;
+        }
     }
     
-    public TimeSeriesManager(int maxDays) {
-        if (maxDays < 1) {
-            throw new IllegalArgumentException("maxDays deve ser >= 1");
-        }
+    public TimeSeriesManager(int maxDays, int maxMemoryDays, TimeSeriesPersistence persistence) {
+        if (maxDays < 1) throw new IllegalArgumentException("maxDays >= 1");
+        if (maxMemoryDays > maxDays) throw new IllegalArgumentException("maxMemoryDays <= maxDays");
+        
         this.maxDays = maxDays;
+        this.maxMemoryDays = maxMemoryDays;
+        this.persistence = persistence;
+        
         this.historicalDays = new ArrayList<>();
         this.currentDayId = 0;
         this.currentDay = new DayData(currentDayId);
         this.lock = new ReentrantReadWriteLock();
+        this.newEventCondition = lock.writeLock().newCondition();
+    }
+    
+    public void setAggregationService(AggregationService as) {
+        this.aggregationService = as;
     }
     
     //Adiciona um evento ao dia corrente.
     public void addEvent(String product, int quantity, double price) {
-        lock.readLock().lock();
+        lock.writeLock().lock();
         try {
             Protocol.Event event = new Protocol.Event(product, quantity, price);
             if (currentDay.completed) {
                 throw new IllegalStateException("Dia já está completo");
             }
             currentDay.events.add(event);
+            newEventCondition.signalAll();
         } finally {
-            lock.readLock().unlock();
+            lock.writeLock().unlock();
         }
     }
 
+    //persistencia
     public void addEvent(Protocol.Event event) {
-        lock.readLock().lock();
+        lock.writeLock().lock();
         try {
             if (currentDay.completed) {
                 throw new IllegalStateException("Dia já está completo");
             }
             currentDay.events.add(event);
+            newEventCondition.signalAll();
         } finally {
-            lock.readLock().unlock();
+            lock.writeLock().unlock();
         }
     }
     
@@ -75,13 +102,33 @@ public class TimeSeriesManager {
         try {
             // Completar o dia atual
             currentDay.completed = true;
+            newEventCondition.signalAll();
+            
+            // Persistir dia atual
+            try {
+                persistence.saveDay(currentDayId, currentDay.events);
+                persistence.saveState(this); 
+            } catch (IOException e) {
+                System.err.println("Erro ao persistir dia " + currentDayId + ": " + e.getMessage());
+            }
             
             // Adicionar ao histórico
             historicalDays.add(0, currentDay);
             
-            // Remover dias antigos se exceder o limite
-            while (historicalDays.size() > maxDays) {
+            // Remover dias antigos da memória se exceder o limite S
+            while (historicalDays.size() > maxMemoryDays) {
                 historicalDays.remove(historicalDays.size() - 1);
+            }
+            
+            // Remover dias antigos do disco se exceder o limite D
+            int dayToDelete = currentDayId - maxDays;
+            if (dayToDelete >= 0) {
+                persistence.deleteDay(dayToDelete);
+            }
+            
+             // Invalida cache de agregação (se existir)
+             if (aggregationService != null) {
+                aggregationService.invalidateCache();
             }
             
             // Criar novo dia
@@ -112,37 +159,32 @@ public class TimeSeriesManager {
             lock.readLock().unlock();
         }
     }
-    
-    //Obtém eventos de um produto específico nos últimos N dias.
-    public List<Protocol.Event> getEventsByProduct(String product, int days) {
-        lock.readLock().lock();
-        try {
-            List<Protocol.Event> result = new ArrayList<>();
-            int count = Math.min(days, historicalDays.size());
-            
-            for (int i = 0; i < count; i++) {
-                for (Protocol.Event event : historicalDays.get(i).events) {
-                    if (event.getProduct().equals(product)) {
-                        result.add(event);
-                    }
-                }
-            }
-            
-            return result;
-        } finally {
-            lock.readLock().unlock();
-        }
-    }
+
     
     //Obtém todos os eventos dos últimos N dias.
     public List<List<Protocol.Event>> getAllEvents(int days) {
         lock.readLock().lock();
         try {
             List<List<Protocol.Event>> result = new ArrayList<>();
-            int count = Math.min(days, historicalDays.size());
+            // Quantos dias temos disponíveis (max D)
+            int availableHistory = Math.min(currentDayId, maxDays);
+            int count = Math.min(days, availableHistory);
             
             for (int i = 0; i < count; i++) {
-                result.add(new ArrayList<>(historicalDays.get(i).events));
+                // i = 0 => Ontem (currentDayId - 1)
+                if (i < historicalDays.size()) {
+                    // Memória
+                    result.add(new ArrayList<>(historicalDays.get(i).events));
+                } else {
+                    // Disco
+                    int targetId = currentDayId - 1 - i;
+                    try {
+                        result.add(persistence.loadDay(targetId));
+                    } catch (IOException e) {
+                        System.err.println("Erro ao carregar dia " + targetId + ": " + e.getMessage());
+                        result.add(new ArrayList<>());
+                    }
+                }
             }
             
             return result;
@@ -160,6 +202,16 @@ public class TimeSeriesManager {
             lock.readLock().unlock();
         }
     }
+
+    public void setCurrentDayId(int id) {
+        lock.writeLock().lock();
+        try {
+            this.currentDayId = id;
+            this.currentDay = new DayData(id);
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
     
     //Obtém o número máximo de dias históricos armazenados.
     public int getMaxDays() {
@@ -170,47 +222,39 @@ public class TimeSeriesManager {
     public int getHistoricalDayCount() {
         lock.readLock().lock();
         try {
-            return historicalDays.size();
+            return Math.min(currentDayId, maxDays);
         } finally {
             lock.readLock().unlock();
         }
     }
-    
-    //Limpa todos os dados de séries temporais.
-    public void clear() {
-        lock.writeLock().lock();
-        try {
-            historicalDays.clear();
-            currentDayId = 0;
-            currentDay = new DayData(currentDayId);
-        } finally {
-            lock.writeLock().unlock();
-        }
-    }
-    
-    //Verifica se um produto existe nos últimos N dias.
-    public boolean hasProduct(String product, int days) {
+
+    /**
+     * Obtém os eventos de UM dia histórico específico.
+     * @param daysAgo 0 = Ontem, 1 = Anteontem, etc.
+     * @return Lista de eventos do dia (pode vir da memória ou disco)
+     */
+    public List<Protocol.Event> getHistoricalDayEvents(int daysAgo) {
         lock.readLock().lock();
         try {
-            int count = Math.min(days, historicalDays.size());
-            for (int i = 0; i < count; i++) {
-                for (Protocol.Event event : historicalDays.get(i).events) {
-                    if (event.getProduct().equals(product)) {
-                        return true;
-                    }
-                }
+            int availableHistory = Math.min(currentDayId, maxDays);
+            
+            if (daysAgo < 0 || daysAgo >= availableHistory) {
+                return new ArrayList<>(); 
             }
-            return false;
-        } finally {
-            lock.readLock().unlock();
-        }
-    }
-    
-    //Obtém o tempo de início do dia corrente.
-    public long getCurrentDayStartTime() {
-        lock.readLock().lock();
-        try {
-            return currentDay.startTime;
+
+            if (daysAgo < historicalDays.size()) {
+                // Em memória
+                return new ArrayList<>(historicalDays.get(daysAgo).events);
+            } else {
+                 // Em disco
+                 int targetId = currentDayId - 1 - daysAgo;
+                 try {
+                     return persistence.loadDay(targetId);
+                 } catch (IOException e) {
+                     System.err.println("Erro ao carregar dia " + targetId + ": " + e.getMessage());
+                     return new ArrayList<>();
+                 }
+            }
         } finally {
             lock.readLock().unlock();
         }
@@ -220,23 +264,21 @@ public class TimeSeriesManager {
     public List<Protocol.Event> getFilteredEvents(List<String> products, Integer dayOffset) {
         lock.readLock().lock();
         try {
-            List<Protocol.Event> result = new ArrayList<>();
+            List<Protocol.Event> sourceEvents = null;
             
             // dayOffset null = dia corrente
             if (dayOffset == null || dayOffset == 0) {
-                for (Protocol.Event event : currentDay.events) {
+                sourceEvents = currentDay.events;
+            } else {
+                // Dia histórico (Reutilizando a lógica do getHistoricalDayEvents mas otimizada se quisermos)
+                sourceEvents = getHistoricalDayEvents(dayOffset - 1);
+            }
+
+            List<Protocol.Event> result = new ArrayList<>();
+            if (sourceEvents != null) {
+                for (Protocol.Event event : sourceEvents) {
                     if (products == null || products.isEmpty() || products.contains(event.getProduct())) {
                         result.add(event);
-                    }
-                }
-            } else {
-                // Dia histórico
-                int index = dayOffset - 1;
-                if (index >= 0 && index < historicalDays.size()) {
-                    for (Protocol.Event event : historicalDays.get(index).events) {
-                        if (products == null || products.isEmpty() || products.contains(event.getProduct())) {
-                            result.add(event);
-                        }
                     }
                 }
             }
@@ -250,10 +292,9 @@ public class TimeSeriesManager {
     //Aguarda até que ambos os produtos sejam vendidos simultaneamente no dia corrente.
     //Retorna true se a condição foi satisfeita, false se o dia terminou antes.
     public boolean waitForSimultaneousSales(String product1, String product2) {
-        // Esta thread vai bloquear aqui até a condição ser satisfeita ou o dia acabar
-        while (true) {
-            lock.readLock().lock();
-            try {
+        lock.writeLock().lock();
+        try {
+            while (true) {
                 // Verificar se o dia acabou
                 if (currentDay.completed) {
                     return false;
@@ -274,26 +315,25 @@ public class TimeSeriesManager {
                         return true;
                     }
                 }
-            } finally {
-                lock.readLock().unlock();
+                
+                try {
+                    newEventCondition.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
             }
-            
-            // Esperar um pouco antes de verificar novamente
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return false;
-            }
+        } finally {
+            lock.writeLock().unlock();
         }
     }
     
     //Aguarda até que N vendas consecutivas ocorram no dia corrente.
     //Retorna o produto com N vendas consecutivas, ou null se o dia terminou.
     public String waitForConsecutiveSales(Integer n) {
-        while (true) {
-            lock.readLock().lock();
-            try {
+        lock.writeLock().lock();
+        try {
+            while (true) {
                 // Verificar se o dia acabou
                 if (currentDay.completed) {
                     return null;
@@ -319,51 +359,17 @@ public class TimeSeriesManager {
                         return product;
                     }
                 }
-            } finally {
-                lock.readLock().unlock();
+                
+                try {
+                    newEventCondition.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return null;
+                }
             }
-            
-            // Esperar um pouco antes de verificar novamente
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return null;
-            }
-        }
-    }
-    
-    //Verifica se o dia corrente está completo.
-    public boolean isCurrentDayCompleted() {
-        lock.readLock().lock();
-        try {
-            return currentDay.completed;
         } finally {
-            lock.readLock().unlock();
-        }
-    }
-    
-    //Obtém o ID do dia histórico com base no offset.
-    public int getHistoricalDayId(int offset) {
-        lock.readLock().lock();
-        try {
-            if (offset < 1 || offset > historicalDays.size()) {
-                return -1;
-            }
-            return historicalDays.get(offset - 1).dayId;
-        } finally {
-            lock.readLock().unlock();
-        }
-    }
-    
-    @Override
-    public String toString() {
-        lock.readLock().lock();
-        try {
-            return String.format("TimeSeriesManager[currentDay=%d, historical=%d/%d, currentEvents=%d]",
-                currentDayId, historicalDays.size(), maxDays, currentDay.events.size());
-        } finally {
-            lock.readLock().unlock();
+            lock.writeLock().unlock();
         }
     }
 }
+

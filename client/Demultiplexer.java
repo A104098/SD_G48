@@ -7,11 +7,8 @@ import java.util.Map;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
-/**
- * Demultiplexer para sincronização de múltiplas threads.
- * Permite que várias threads enviem pedidos concorrentemente sem se bloquearem mutuamente.
- * Uma thread lê do socket e distribui as respostas para as threads corretas.
- */
+//Demultiplexer para sincronização de múltiplas threads
+
 public class Demultiplexer implements AutoCloseable {
     private final Socket socket;
     private final DataInputStream in;
@@ -24,7 +21,7 @@ public class Demultiplexer implements AutoCloseable {
     private final Map<Integer, Entry> pendingRequests = new HashMap<>();
     
     private int nextTag = 0;
-    private IOException exception = null; // Para propagar erros do socket
+    private IOException exception = null; // Para erros do socket
 
     public Demultiplexer(Socket socket) throws IOException {
         this.socket = socket;
@@ -38,7 +35,7 @@ public class Demultiplexer implements AutoCloseable {
         readerThread.start();
     }
 
-    // Classe auxiliar para sincronização (Wait/Notify para cada pedido específico)
+    // Classe auxiliar para sincronização
     private static class Entry {
         final Condition cond;
         byte[] data;
@@ -48,10 +45,7 @@ public class Demultiplexer implements AutoCloseable {
         }
     }
 
-    /**
-     * Método usado pelas várias threads do cliente.
-     * Envia um pedido e bloqueia até a resposta específica desse pedido chegar.
-     */
+
     public byte[] send(byte[] data) throws IOException {
         int tag;
         Entry entry;
